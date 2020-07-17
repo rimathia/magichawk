@@ -2,20 +2,22 @@ extern crate chrono;
 #[macro_use]
 extern crate lazy_static;
 extern crate log;
+extern crate pdfgen_bindings;
 extern crate regex;
 extern crate reqwest;
 
-use image::{imageops::overlay, DynamicImage, GenericImageView, Rgba, RgbaImage};
+use image::{
+    imageops::overlay,
+    jpeg::{JPEGEncoder, PixelDensity, PixelDensityUnit},
+    DynamicImage, GenericImageView, Rgba, RgbaImage,
+};
 use log::{debug, error, info};
 use regex::Match;
 use regex::Regex;
-use std::io::{Cursor, Write};
+use std::io::{Cursor, Read};
+use std::os::unix::ffi::OsStrExt;
 use std::string::String;
 use std::time::{Duration, Instant};
-use tiff::{
-    encoder::{colortype::RGBA8, Rational, TiffEncoder},
-    tags::ResolutionUnit,
-};
 use Option::{None, Some};
 
 pub const IMAGE_WIDTH: u32 = 480;
@@ -25,6 +27,7 @@ pub const PAGE_WIDTH: u32 = 3 * IMAGE_WIDTH;
 pub const PAGE_HEIGHT: u32 = 3 * IMAGE_HEIGHT;
 
 pub const IMAGE_HEIGHT_CM: f64 = 8.7;
+pub const IMAGE_WIDTH_CM: f64 = IMAGE_HEIGHT_CM * IMAGE_WIDTH as f64 / IMAGE_HEIGHT as f64;
 
 pub fn setup_logger() -> Result<(), fern::InitError> {
     fern::Dispatch::new()
@@ -167,9 +170,28 @@ impl ScryfallCache {
         }
         return self.images.get(&key).unwrap();
     }
+
+    pub fn list(&self) -> String {
+        let mut desc: String = "<ul>".to_string();
+        for (key, value) in &self.images {
+            desc.push_str(
+                format!(
+                    "<li>{:?}: {}</li>",
+                    key,
+                    match value {
+                        Some(_) => "cached",
+                        None => "query failed",
+                    },
+                )
+                .as_str(),
+            );
+        }
+        desc.push_str("</ul>");
+        desc
+    }
 }
 
-pub fn create_tiff(images: Vec<DynamicImage>) -> Option<Vec<u8>> {
+pub fn images_to_pdf(images: Vec<DynamicImage>) -> Option<Vec<u8>> {
     if images.iter().any(|i| {
         let dim = i.dimensions();
         if dim != (IMAGE_WIDTH, IMAGE_HEIGHT) {
@@ -186,17 +208,36 @@ pub fn create_tiff(images: Vec<DynamicImage>) -> Option<Vec<u8>> {
         return None;
     }
 
-    let mut outputbuffer: Vec<u8> = vec![];
-    let mut f = Cursor::new(&mut outputbuffer);
-    let mut encoder = TiffEncoder::new(&mut f).unwrap();
-
     let mut pos_hor = 0;
     let mut pos_ver = 0;
 
     let white_pixel = Rgba::<u8>([255, 255, 255, 255]);
     let mut composed = RgbaImage::from_pixel(0, 0, white_pixel);
 
+    let info = pdfgen_bindings::PDFInfo {
+        creator: [0; 64],
+        producer: [0; 64],
+        title: [0; 64],
+        author: [0; 64],
+        subject: [0; 64],
+        date: [0; 64],
+    };
+
+    let pdf = unsafe {
+        pdfgen_bindings::pdf_create(pdfgen_bindings::A4_WIDTH, pdfgen_bindings::A4_HEIGHT, &info)
+    };
+
     for (i_im, im) in images.iter().enumerate() {
+        let mut outputbuffer: Vec<u8> = vec![];
+        let mut outputcursor = Cursor::new(&mut outputbuffer);
+        let mut encoder = JPEGEncoder::new_with_quality(&mut outputcursor, 100);
+        let image_px_per_cm: u16 = ((IMAGE_HEIGHT as f64) / IMAGE_HEIGHT_CM).round() as u16;
+
+        let image_dpi: PixelDensity = PixelDensity {
+            density: (image_px_per_cm, image_px_per_cm),
+            unit: PixelDensityUnit::Centimeters,
+        };
+        encoder.set_pixel_density(image_dpi);
         if pos_hor == 0 && pos_ver == 0 {
             composed = RgbaImage::from_pixel(PAGE_WIDTH, PAGE_HEIGHT, white_pixel);
         }
@@ -215,48 +256,59 @@ pub fn create_tiff(images: Vec<DynamicImage>) -> Option<Vec<u8>> {
             }
         }
         if i_im % 9 == 8 || i_im == images.len() - 1 {
-            let mut idx = 0;
-            match encoder.new_image::<RGBA8>(PAGE_WIDTH, PAGE_HEIGHT) {
-                Ok(mut page) => {
-                    page.resolution(
-                        ResolutionUnit::Centimeter,
-                        Rational {
-                            n: ((IMAGE_HEIGHT as f64) / IMAGE_HEIGHT_CM).round() as u32,
-                            d: 1,
-                        },
+            match encoder.encode_image(&composed) {
+                Ok(_) => unsafe {
+                    let page = pdfgen_bindings::pdf_append_page(pdf);
+                    pdfgen_bindings::pdf_add_jpeg_data(
+                        pdf,
+                        page,
+                        pdfgen_bindings::mm_to_point(13.0),
+                        pdfgen_bindings::mm_to_point(18.0),
+                        pdfgen_bindings::mm_to_point((3.0f64 * IMAGE_WIDTH_CM * 10.0f64) as f32),
+                        pdfgen_bindings::mm_to_point((3.0f64 * IMAGE_HEIGHT_CM * 10.0) as f32),
+                        outputbuffer.as_slice().as_ptr(),
+                        outputbuffer.len(),
                     );
-                    let buffer = composed.clone().into_raw();
-                    while page.next_strip_sample_count() > 0 {
-                        let sample_count = page.next_strip_sample_count() as usize;
-                        match page.write_strip(&buffer[idx..idx + sample_count]) {
-                            Ok(_) => {}
-                            Err(e) => {
-                                error!("error in writing tiff strip: {}", e);
-                                return None;
-                            }
-                        }
-                        idx += sample_count;
-                    }
-                    match page.finish() {
-                        Ok(_) => {}
-                        Err(e) => {
-                            error!("error in finishing tiff page: {}", e);
-                            return None;
-                        }
-                    }
-                }
+                },
                 Err(e) => {
-                    error!("tiff error in page creation: {}", e);
+                    error!("error in jpeg encoding: {}", e);
                     return None;
                 }
             }
         }
     }
-    debug!("output buffer has size {}", outputbuffer.len());
-    Some(outputbuffer)
+
+    let tmpfilename = match tempfile::NamedTempFile::new() {
+        Ok(t) => t.into_temp_path(),
+        Err(e) => {
+            error!("error in creation of temporary file: {}", e);
+            return None;
+        }
+    };
+    debug!("created temporary file {:?}", tmpfilename);
+    let tmpfilename_c = match std::ffi::CString::new(tmpfilename.as_os_str().as_bytes()) {
+        Ok(x) => x,
+        Err(e) => {
+            error!("error in creating c string: {}", e);
+            return None;
+        }
+    };
+
+    unsafe {
+        pdfgen_bindings::pdf_save(pdf, tmpfilename_c.as_ptr());
+        pdfgen_bindings::pdf_destroy(pdf);
+    }
+
+    let mut pdfbytes = Vec::<u8>::new();
+    std::fs::File::open(tmpfilename)
+        .unwrap()
+        .read_to_end(&mut pdfbytes)
+        .unwrap();
+
+    Some(pdfbytes)
 }
 
-pub fn decklist_to_tiff(cache: &mut ScryfallCache, decklist: &str) -> Option<Vec<u8>> {
+pub fn decklist_to_images(cache: &mut ScryfallCache, decklist: &str) -> Option<Vec<DynamicImage>> {
     let parsed = parse_decklist(decklist);
     let mut images: Vec<DynamicImage> = vec![];
     for line in parsed.iter() {
@@ -276,39 +328,11 @@ pub fn decklist_to_tiff(cache: &mut ScryfallCache, decklist: &str) -> Option<Vec
             None => {}
         }
     }
-    create_tiff(images)
+    Some(images)
 }
 
-pub fn decklist_to_zipped_tiff(cache: &mut ScryfallCache, decklist: &str) -> Option<Vec<u8>> {
-    let t = decklist_to_tiff(cache, decklist)?;
-    debug!("tiff file has size {}", t.len());
-    let zipbuffer: Vec<u8> = vec![];
-    let mut zip = zip::ZipWriter::new(Cursor::new(zipbuffer));
-    match zip.start_file("proxies.tiff", zip::write::FileOptions::default()) {
-        Err(e) => {
-            error!("error in starting file: {}", e);
-            return None;
-        }
-        Ok(_) => {}
-    }
-    match zip.write_all(&t) {
-        Err(e) => {
-            error!("error in writing to zip file: {}", e);
-            return None;
-        }
-        Ok(_) => {}
-    }
-    match zip.finish() {
-        Ok(w) => {
-            let zipped_bytes = w.into_inner();
-            debug!("zipped file has size {}", zipped_bytes.len());
-            Some(zipped_bytes)
-        }
-        Err(e) => {
-            error!("error in creating zip from tiff: {}", e);
-            None
-        }
-    }
+pub fn decklist_to_pdf(cache: &mut ScryfallCache, decklist: &str) -> Option<Vec<u8>> {
+    images_to_pdf(decklist_to_images(cache, decklist)?)
 }
 
 #[cfg(test)]
@@ -433,6 +457,44 @@ mod tests {
                 }),
             },
         ];
+        for (left, right) in parsed.iter().zip(expected.iter()) {
+            assert_eq!(left, right);
+        }
+    }
+
+    #[test]
+    fn arenaexport() {
+        let decklist = "Deck
+        1 Bedeck // Bedazzle (RNA) 221
+        1 Spawn of Mayhem (RNA) 85
+        ";
+        let expected = vec![
+            ParsedDecklistLine {
+                line: "Deck",
+                entry: Some(DecklistEntry {
+                    multiple: 1,
+                    name: "Deck",
+                    set: None,
+                }),
+            },
+            ParsedDecklistLine {
+                line: "1 Bedeck // Bedazzle (RNA) 221",
+                entry: Some(DecklistEntry {
+                    multiple: 1,
+                    name: "Bedeck // Bedazzle",
+                    set: Some("RNA"),
+                }),
+            },
+            ParsedDecklistLine {
+                line: "1 Spawn of Mayhem (RNA) 85",
+                entry: Some(DecklistEntry {
+                    multiple: 1,
+                    name: "Spawn of Mayhem",
+                    set: Some("RNA"),
+                }),
+            },
+        ];
+        let parsed = parse_decklist(decklist);
         for (left, right) in parsed.iter().zip(expected.iter()) {
             assert_eq!(left, right);
         }
