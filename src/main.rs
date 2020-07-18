@@ -2,12 +2,12 @@
 
 #[macro_use]
 extern crate rocket;
-// #[macro_use]
 extern crate rocket_contrib;
 
 use rocket::{http::ContentType, response::Content, Response, State};
 use rocket_contrib::serve::StaticFiles;
 use std::sync::Mutex;
+use std::time::Duration;
 
 #[get("/decklist?<text>")]
 fn process_decklist(
@@ -28,6 +28,18 @@ fn list_cache(state: State<Mutex<magichawk::ScryfallCache>>) -> Content<String> 
     Content(ContentType::HTML, state.lock().unwrap().list())
 }
 
+#[get("/cache/purge?<age_seconds>")]
+fn purge_cache(
+    state: State<Mutex<magichawk::ScryfallCache>>,
+    age_seconds: Option<u64>,
+) -> Content<String> {
+    state
+        .lock()
+        .unwrap()
+        .purge(age_seconds.map(|s| Duration::from_secs(s)));
+    list_cache(state)
+}
+
 fn main() {
     let cache = Mutex::new(magichawk::ScryfallCache::new());
 
@@ -36,6 +48,7 @@ fn main() {
         .mount("/", StaticFiles::from("static/"))
         .mount("/", routes![process_decklist])
         .mount("/", routes![list_cache])
+        .mount("/", routes![purge_cache])
         .manage(cache)
         .launch();
 }

@@ -14,6 +14,7 @@ use image::{
 use log::{debug, error, info};
 use regex::Match;
 use regex::Regex;
+use std::fmt;
 use std::io::{Cursor, Read};
 use std::os::unix::ffi::OsStrExt;
 use std::string::String;
@@ -47,17 +48,63 @@ pub fn setup_logger() -> Result<(), fern::InitError> {
     Ok(())
 }
 
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+pub struct Card {
+    name: String,
+    set: Option<String>,
+}
+
+impl fmt::Display for Card {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match &self.set {
+            Some(set) => write!(f, "{} ({})", self.name, set),
+            None => write!(f, "{}", self.name),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
-pub struct DecklistEntry<'a> {
+pub struct DecklistEntry {
     multiple: i32,
-    name: &'a str,
-    set: Option<&'a str>,
+    card: Card,
+}
+
+impl DecklistEntry {
+    pub fn new(m: i32, n: &str, s: Option<&str>) -> DecklistEntry {
+        DecklistEntry {
+            multiple: m,
+            card: Card {
+                name: n.to_string(),
+                set: s.map(|x| x.to_string()),
+            },
+        }
+    }
+
+    pub fn from_name(n: &str) -> DecklistEntry {
+        DecklistEntry {
+            multiple: 1,
+            card: Card {
+                name: n.to_string(),
+                set: None,
+            },
+        }
+    }
+
+    pub fn from_multiple_name(m: i32, n: &str) -> DecklistEntry {
+        DecklistEntry {
+            multiple: m,
+            card: Card {
+                name: n.to_string(),
+                set: None,
+            },
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
 pub struct ParsedDecklistLine<'a> {
     line: &'a str,
-    entry: Option<DecklistEntry<'a>>,
+    entry: Option<DecklistEntry>,
 }
 
 fn parse_set(group: Option<Match>) -> Option<&str> {
@@ -80,8 +127,10 @@ pub fn parse_line(line: &str) -> Option<DecklistEntry> {
     match REMNS.captures(line) {
         Some(mns) => Some(DecklistEntry {
             multiple: parse_multiple(mns.get(1)),
-            name: mns.get(2)?.as_str().trim(),
-            set: parse_set(mns.get(3)),
+            card: Card {
+                name: mns.get(2)?.as_str().trim().to_string(),
+                set: parse_set(mns.get(3)).map(|s| s.to_string()),
+            },
         }),
         None => None,
     }
@@ -103,13 +152,13 @@ pub fn encode_card_name(name: &str) -> String {
     name.replace(" ", "+")
 }
 
-pub fn query_image(name: &str, set: Option<&str>) -> Option<DynamicImage> {
+pub fn query_image(card: &Card) -> Option<DynamicImage> {
     let mut url = format!(
         "https://api.scryfall.com/cards/named?fuzzy={}&version=border_crop&format=image",
-        encode_card_name(name)
+        encode_card_name(card.name.as_str())
     );
-    if set.is_some() {
-        url += format!("&set={}", set.unwrap()).as_str();
+    if card.set.is_some() {
+        url += format!("&set={}", card.set.as_ref().unwrap()).as_str();
     }
 
     debug!("scryfall uri: {}", url);
@@ -138,27 +187,63 @@ pub fn query_image(name: &str, set: Option<&str>) -> Option<DynamicImage> {
     }
 }
 
+pub struct CachedImageResponse {
+    t: Instant,
+    image: Option<DynamicImage>,
+}
+
+impl CachedImageResponse {
+    pub fn from_image(i: DynamicImage) -> CachedImageResponse {
+        CachedImageResponse {
+            t: Instant::now(),
+            image: Some(i),
+        }
+    }
+}
+
+impl fmt::Display for CachedImageResponse {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let age = Instant::now() - self.t;
+        match self.image {
+            Some(_) => write!(f, "created {:?} ago, contains image", age),
+            None => write!(f, "created {:?} ago, no image", age),
+        }
+    }
+}
+
+impl fmt::Debug for CachedImageResponse {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
 pub struct ScryfallCache {
     last_query: Instant,
-    images: std::collections::HashMap<(String, Option<String>), Option<DynamicImage>>,
+    last_purge: Instant,
+    images: std::collections::HashMap<Card, CachedImageResponse>,
 }
 
 impl ScryfallCache {
     const COOLDOWN: Duration = Duration::from_millis(100);
 
+    const MAX_AGE: Duration = Duration::from_secs(14 * 24 * 60 * 60);
+
     pub fn new() -> ScryfallCache {
         ScryfallCache {
             last_query: Instant::now(),
+            last_purge: Instant::now(),
             images: std::collections::HashMap::new(),
         }
     }
 
-    fn query_image(&mut self, name: &str, set: Option<&str>) -> &Option<DynamicImage> {
-        let key = (name.to_string(), set.map(|s| s.to_string()));
-        if self.images.contains_key(&key) {
-            debug!("image for name {:?} and set {:?} is cached", name, set);
+    fn query_image(&mut self, card: &Card) -> Option<&DynamicImage> {
+        let n = Instant::now();
+        if n - self.last_purge > ScryfallCache::MAX_AGE {
+            self.purge(Some(ScryfallCache::MAX_AGE));
+        }
+        if self.images.contains_key(card) {
+            debug!("image for {} is cached", card);
         } else {
-            let n = Instant::now();
             if n - self.last_query < ScryfallCache::COOLDOWN {
                 debug!("waiting before next scryfall call");
                 std::thread::sleep(ScryfallCache::COOLDOWN - (n - self.last_query));
@@ -166,28 +251,33 @@ impl ScryfallCache {
                 debug!("last scryfall call was {:?} ago", n - self.last_query);
             }
             self.last_query = n;
-            self.images.insert(key.clone(), query_image(name, set));
+            self.images.insert(
+                card.clone(),
+                CachedImageResponse {
+                    t: Instant::now(),
+                    image: query_image(card),
+                },
+            );
         }
-        return self.images.get(&key).unwrap();
+        return self.images.get(&card).unwrap().image.as_ref();
     }
 
     pub fn list(&self) -> String {
         let mut desc: String = "<ul>".to_string();
         for (key, value) in &self.images {
-            desc.push_str(
-                format!(
-                    "<li>{:?}: {}</li>",
-                    key,
-                    match value {
-                        Some(_) => "cached",
-                        None => "query failed",
-                    },
-                )
-                .as_str(),
-            );
+            desc.push_str(format!("<li>{}: {:?}</li>", key, value).as_str());
         }
         desc.push_str("</ul>");
         desc
+    }
+
+    pub fn purge(&mut self, max_age: Option<Duration>) {
+        let n = Instant::now();
+        debug!("{} cached responses before purging", self.images.len());
+        self.images
+            .retain(|_, value| n - value.t < max_age.unwrap_or(ScryfallCache::MAX_AGE));
+        self.last_purge = n;
+        debug!("{} cached responses after purging", self.images.len());
     }
 }
 
@@ -314,7 +404,7 @@ pub fn decklist_to_images(cache: &mut ScryfallCache, decklist: &str) -> Option<V
     for line in parsed.iter() {
         match &line.entry {
             Some(e) => {
-                let im = cache.query_image(e.name, e.set);
+                let im = cache.query_image(&e.card);
                 match im {
                     Some(i) => {
                         debug!("adding image for line {:?}", line);
@@ -342,11 +432,7 @@ mod tests {
     fn name() {
         assert_eq!(
             parse_line("plains").unwrap(),
-            DecklistEntry {
-                multiple: 1,
-                name: "plains",
-                set: None
-            }
+            DecklistEntry::from_name("plains")
         );
     }
 
@@ -354,11 +440,7 @@ mod tests {
     fn number_name() {
         assert_eq!(
             parse_line("2\tplains").unwrap(),
-            DecklistEntry {
-                multiple: 2,
-                name: "plains",
-                set: None
-            }
+            DecklistEntry::from_multiple_name(2, "plains")
         );
     }
 
@@ -366,11 +448,7 @@ mod tests {
     fn number_name_set() {
         assert_eq!(
             parse_line("17 long card's name [IPA]").unwrap(),
-            DecklistEntry {
-                multiple: 17,
-                name: "long card's name",
-                set: Some("IPA")
-            }
+            DecklistEntry::new(17, "long card's name", Some("IPA"))
         );
     }
 
@@ -378,11 +456,7 @@ mod tests {
     fn name_set() {
         assert_eq!(
             parse_line("long card's name [IPA]").unwrap(),
-            DecklistEntry {
-                multiple: 1,
-                name: "long card's name",
-                set: Some("IPA")
-            }
+            DecklistEntry::new(1, "long card's name", Some("IPA"))
         );
     }
 
@@ -390,11 +464,7 @@ mod tests {
     fn name_with_tab() {
         assert_eq!(
             parse_line("Incubation/Incongruity   \t\t---").unwrap(),
-            DecklistEntry {
-                multiple: 1,
-                name: "Incubation/Incongruity",
-                set: None
-            }
+            DecklistEntry::from_multiple_name(1, "Incubation/Incongruity")
         );
     }
 
@@ -410,51 +480,30 @@ mod tests {
         let expected = vec![
             ParsedDecklistLine {
                 line: "4  Beanstalk Giant   		$0.25",
-                entry: Some(DecklistEntry {
-                    multiple: 4,
-                    name: "Beanstalk Giant",
-                    set: None,
-                }),
+                entry: Some(DecklistEntry::from_multiple_name(4, "Beanstalk Giant")),
             },
             ParsedDecklistLine {
                 line: "4  Lovestruck Beast   		$1.5",
-                entry: Some(DecklistEntry {
-                    multiple: 4,
-                    name: "Lovestruck Beast",
-                    set: None,
-                }),
+                entry: Some(DecklistEntry::from_multiple_name(4, "Lovestruck Beast")),
             },
             ParsedDecklistLine {
                 line: "Artifact [5]",
-                entry: Some(DecklistEntry {
-                    multiple: 1,
-                    name: "Artifact",
-                    set: None,
-                }),
+                entry: Some(DecklistEntry::from_multiple_name(1, "Artifact")),
             },
             ParsedDecklistLine {
                 line: "1  The Great Henge   		$25",
-                entry: Some(DecklistEntry {
-                    multiple: 1,
-                    name: "The Great Henge",
-                    set: None,
-                }),
+                entry: Some(DecklistEntry::from_multiple_name(1, "The Great Henge")),
             },
             ParsedDecklistLine {
                 line: "Instant [1]",
-                entry: Some(DecklistEntry {
-                    multiple: 1,
-                    name: "Instant",
-                    set: None,
-                }),
+                entry: Some(DecklistEntry::from_multiple_name(1, "Instant")),
             },
             ParsedDecklistLine {
                 line: "1  Incubation/Incongruity   		---",
-                entry: Some(DecklistEntry {
-                    multiple: 1,
-                    name: "Incubation/Incongruity",
-                    set: None,
-                }),
+                entry: Some(DecklistEntry::from_multiple_name(
+                    1,
+                    "Incubation/Incongruity",
+                )),
             },
         ];
         for (left, right) in parsed.iter().zip(expected.iter()) {
@@ -471,27 +520,15 @@ mod tests {
         let expected = vec![
             ParsedDecklistLine {
                 line: "Deck",
-                entry: Some(DecklistEntry {
-                    multiple: 1,
-                    name: "Deck",
-                    set: None,
-                }),
+                entry: Some(DecklistEntry::from_multiple_name(1, "Deck")),
             },
             ParsedDecklistLine {
                 line: "1 Bedeck // Bedazzle (RNA) 221",
-                entry: Some(DecklistEntry {
-                    multiple: 1,
-                    name: "Bedeck // Bedazzle",
-                    set: Some("RNA"),
-                }),
+                entry: Some(DecklistEntry::new(1, "Bedeck // Bedazzle", Some("RNA"))),
             },
             ParsedDecklistLine {
                 line: "1 Spawn of Mayhem (RNA) 85",
-                entry: Some(DecklistEntry {
-                    multiple: 1,
-                    name: "Spawn of Mayhem",
-                    set: Some("RNA"),
-                }),
+                entry: Some(DecklistEntry::new(1, "Spawn of Mayhem", Some("RNA"))),
             },
         ];
         let parsed = parse_decklist(decklist);

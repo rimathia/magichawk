@@ -1,0 +1,3 @@
+magichawk
+=======
+Minimal rust web server built on [Rocket](https://rocket.rs/) and [PDFGen](https://github.com/AndreRenaud/PDFGen) which creates proxy sheets using images from the [Scryfall API](https://scryfall.com/docs/api). Should be conforming with the rate limits of the Scryfall API since it waits 100 milliseconds between consecutive calls and caches the responses for 14 days. Don't expect much in terms of best practices, this project serves as a learning experience for me.
