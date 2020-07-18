@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <title>proxies</title>
+    <style>
+        @media print {
+            @page {
+                page: 0;
+            }
+
+            p {
+                break-after: always;
+            }
+        }
+
+        page-picture {
+            width: 2174px;
+            height: 3080px;
+        }
+    </style>
+    <!-- 480px x 680px target height: 8.7 cm 680px / 300 dpi=2.266666... inches=5.76 cm=> factor 1.51 => page 2174px x 3080 px -->
+    <!-- I don't manage to get the image printed in the right size from html -->
+</head>
+
+<body>
+    <p><img class="page-picture" src="examplepage_bw_scaled.jpg"></p>
+    <p><img class="page-picture" src="examplepage_bw_scaled.jpg"></p>
+</body>
+
+</html>
