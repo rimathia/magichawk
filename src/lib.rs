@@ -9,11 +9,13 @@ extern crate reqwest;
 use image::{
     imageops::overlay,
     jpeg::{JPEGEncoder, PixelDensity, PixelDensityUnit},
-    DynamicImage, GenericImageView, Rgba, RgbaImage,
+    DynamicImage, GenericImage, GenericImageView, ImageResult, Rgba, RgbaImage,
 };
+use itertools::Itertools;
 use log::{debug, error, info};
 use regex::Match;
 use regex::Regex;
+use std::convert::TryFrom;
 use std::fmt;
 use std::io::{Cursor, Read};
 use std::os::unix::ffi::OsStrExt;
@@ -236,7 +238,7 @@ impl ScryfallCache {
         }
     }
 
-    fn query_image(&mut self, card: &Card) -> Option<&DynamicImage> {
+    fn ensure_contains(&mut self, card: &Card) {
         let n = Instant::now();
         if n - self.last_purge > ScryfallCache::MAX_AGE {
             self.purge(Some(ScryfallCache::MAX_AGE));
@@ -259,7 +261,11 @@ impl ScryfallCache {
                 },
             );
         }
-        return self.images.get(&card).unwrap().image.as_ref();
+    }
+
+    fn query_image(&mut self, card: &Card) -> Option<DynamicImage> {
+        self.ensure_contains(card);
+        self.images.get(&card).unwrap().image.clone()
     }
 
     pub fn list(&self) -> String {
@@ -281,29 +287,67 @@ impl ScryfallCache {
     }
 }
 
-pub fn images_to_pdf(images: Vec<DynamicImage>) -> Option<Vec<u8>> {
-    if images.iter().any(|i| {
-        let dim = i.dimensions();
-        if dim != (IMAGE_WIDTH, IMAGE_HEIGHT) {
-            error!("unexpected image dimensions {:?}", dim);
-            return true;
-        }
-        return false;
-    }) {
-        return None;
-    }
+pub fn expand_multiples(entry: DecklistEntry) -> itertools::RepeatN<Card> {
+    itertools::repeat_n(entry.card, usize::try_from(entry.multiple).unwrap_or(0))
+}
 
-    if images.len() == 0 {
-        error!("empty vector of images");
-        return None;
-    }
-
+pub fn images_to_page<I>(mut it: I) -> Option<RgbaImage>
+where
+    I: Iterator<Item = DynamicImage>,
+{
     let mut pos_hor = 0;
     let mut pos_ver = 0;
 
+    let mut composed: Option<RgbaImage> = None;
     let white_pixel = Rgba::<u8>([255, 255, 255, 255]);
-    let mut composed = RgbaImage::from_pixel(0, 0, white_pixel);
 
+    loop {
+        match it.next() {
+            None => return composed,
+            Some(im) => {
+                overlay(
+                    composed.get_or_insert(RgbaImage::from_pixel(
+                        PAGE_WIDTH,
+                        PAGE_HEIGHT,
+                        white_pixel,
+                    )),
+                    &im,
+                    pos_hor * IMAGE_WIDTH,
+                    pos_ver * IMAGE_HEIGHT,
+                );
+                pos_hor += 1;
+                if pos_hor == 3 {
+                    pos_hor = 0;
+                    pos_ver += 1;
+                }
+                if pos_ver == 3 {
+                    return composed;
+                }
+            }
+        }
+    }
+}
+
+pub fn encode_jpeg<I: GenericImageView>(im: &I) -> ImageResult<Vec<u8>> {
+    let mut outputbuffer: Vec<u8> = vec![];
+    let mut outputcursor = Cursor::new(&mut outputbuffer);
+    let mut encoder = JPEGEncoder::new_with_quality(&mut outputcursor, 100);
+    let image_px_per_cm: u16 = ((IMAGE_HEIGHT as f64) / IMAGE_HEIGHT_CM).round() as u16;
+
+    let image_dpi: PixelDensity = PixelDensity {
+        density: (image_px_per_cm, image_px_per_cm),
+        unit: PixelDensityUnit::Centimeters,
+    };
+    encoder.set_pixel_density(image_dpi);
+    encoder.encode_image(im)?;
+    Ok(outputbuffer)
+}
+
+pub fn pages_to_pdf<I>(mut it: I) -> Option<Vec<u8>>
+where
+    I: Iterator,
+    I::Item: GenericImage,
+{
     let info = pdfgen_bindings::PDFInfo {
         creator: [0; 64],
         producer: [0; 64],
@@ -317,37 +361,10 @@ pub fn images_to_pdf(images: Vec<DynamicImage>) -> Option<Vec<u8>> {
         pdfgen_bindings::pdf_create(pdfgen_bindings::A4_WIDTH, pdfgen_bindings::A4_HEIGHT, &info)
     };
 
-    for (i_im, im) in images.iter().enumerate() {
-        let mut outputbuffer: Vec<u8> = vec![];
-        let mut outputcursor = Cursor::new(&mut outputbuffer);
-        let mut encoder = JPEGEncoder::new_with_quality(&mut outputcursor, 100);
-        let image_px_per_cm: u16 = ((IMAGE_HEIGHT as f64) / IMAGE_HEIGHT_CM).round() as u16;
-
-        let image_dpi: PixelDensity = PixelDensity {
-            density: (image_px_per_cm, image_px_per_cm),
-            unit: PixelDensityUnit::Centimeters,
-        };
-        encoder.set_pixel_density(image_dpi);
-        if pos_hor == 0 && pos_ver == 0 {
-            composed = RgbaImage::from_pixel(PAGE_WIDTH, PAGE_HEIGHT, white_pixel);
-        }
-        overlay(
-            &mut composed,
-            im,
-            pos_hor * IMAGE_WIDTH,
-            pos_ver * IMAGE_HEIGHT,
-        );
-        pos_hor += 1;
-        if pos_hor == 3 {
-            pos_hor = 0;
-            pos_ver += 1;
-            if pos_ver == 3 {
-                pos_ver = 0;
-            }
-        }
-        if i_im % 9 == 8 || i_im == images.len() - 1 {
-            match encoder.encode_image(&composed) {
-                Ok(_) => unsafe {
+    loop {
+        match it.next() {
+            Some(grid) => match encode_jpeg(&grid) {
+                Ok(outputbuffer) => unsafe {
                     let page = pdfgen_bindings::pdf_append_page(pdf);
                     pdfgen_bindings::pdf_add_jpeg_data(
                         pdf,
@@ -364,65 +381,52 @@ pub fn images_to_pdf(images: Vec<DynamicImage>) -> Option<Vec<u8>> {
                     error!("error in jpeg encoding: {}", e);
                     return None;
                 }
-            }
-        }
-    }
-
-    let tmpfilename = match tempfile::NamedTempFile::new() {
-        Ok(t) => t.into_temp_path(),
-        Err(e) => {
-            error!("error in creation of temporary file: {}", e);
-            return None;
-        }
-    };
-    debug!("created temporary file {:?}", tmpfilename);
-    let tmpfilename_c = match std::ffi::CString::new(tmpfilename.as_os_str().as_bytes()) {
-        Ok(x) => x,
-        Err(e) => {
-            error!("error in creating c string: {}", e);
-            return None;
-        }
-    };
-
-    unsafe {
-        pdfgen_bindings::pdf_save(pdf, tmpfilename_c.as_ptr());
-        pdfgen_bindings::pdf_destroy(pdf);
-    }
-
-    let mut pdfbytes = Vec::<u8>::new();
-    std::fs::File::open(tmpfilename)
-        .unwrap()
-        .read_to_end(&mut pdfbytes)
-        .unwrap();
-
-    Some(pdfbytes)
-}
-
-pub fn decklist_to_images(cache: &mut ScryfallCache, decklist: &str) -> Option<Vec<DynamicImage>> {
-    let parsed = parse_decklist(decklist);
-    let mut images: Vec<DynamicImage> = vec![];
-    for line in parsed.iter() {
-        match &line.entry {
-            Some(e) => {
-                let im = cache.query_image(&e.card);
-                match im {
-                    Some(i) => {
-                        debug!("adding image for line {:?}", line);
-                        for _ in 0..e.multiple {
-                            images.push(i.clone());
-                        }
+            },
+            None => {
+                let tmpfilename = match tempfile::NamedTempFile::new() {
+                    Ok(t) => t.into_temp_path(),
+                    Err(e) => {
+                        error!("error in creation of temporary file: {}", e);
+                        return None;
                     }
-                    None => {}
+                };
+                debug!("created temporary file {:?}", tmpfilename);
+                let tmpfilename_c = match std::ffi::CString::new(tmpfilename.as_os_str().as_bytes())
+                {
+                    Ok(x) => x,
+                    Err(e) => {
+                        error!("error in creating c string: {}", e);
+                        return None;
+                    }
+                };
+
+                unsafe {
+                    pdfgen_bindings::pdf_save(pdf, tmpfilename_c.as_ptr());
+                    pdfgen_bindings::pdf_destroy(pdf);
                 }
+
+                let mut pdfbytes = Vec::<u8>::new();
+                std::fs::File::open(tmpfilename)
+                    .unwrap()
+                    .read_to_end(&mut pdfbytes)
+                    .unwrap();
+
+                return Some(pdfbytes);
             }
-            None => {}
         }
     }
-    Some(images)
 }
 
 pub fn decklist_to_pdf(cache: &mut ScryfallCache, decklist: &str) -> Option<Vec<u8>> {
-    images_to_pdf(decklist_to_images(cache, decklist)?)
+    pages_to_pdf(
+        parse_decklist(decklist)
+            .into_iter()
+            .flat_map(|parsed| parsed.entry.into_iter())
+            .flat_map(expand_multiples)
+            .map(|it| cache.query_image(&it))
+            .flat_map(|e| e.into_iter())
+            .batching(|it| images_to_page(it)),
+    )
 }
 
 #[cfg(test)]
