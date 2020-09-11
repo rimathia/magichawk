@@ -5,6 +5,8 @@ extern crate log;
 extern crate pdfgen_bindings;
 extern crate regex;
 extern crate reqwest;
+extern crate serde;
+extern crate serde_json;
 
 use image::{
     imageops::overlay,
@@ -15,6 +17,8 @@ use itertools::Itertools;
 use log::{debug, error, info};
 use regex::Match;
 use regex::Regex;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::convert::TryFrom;
 use std::fmt;
 use std::io::{Cursor, Read};
@@ -22,6 +26,8 @@ use std::os::unix::ffi::OsStrExt;
 use std::string::String;
 use std::time::{Duration, Instant};
 use Option::{None, Some};
+
+pub const SCRYFALL_CARD_NAMES: &'static str = "https://api.scryfall.com/catalog/card-names";
 
 pub const IMAGE_WIDTH: u32 = 480;
 pub const IMAGE_HEIGHT: u32 = 680;
@@ -48,6 +54,66 @@ pub fn setup_logger() -> Result<(), fern::InitError> {
         .chain(fern::log_file("output.log")?)
         .apply()?;
     Ok(())
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ScryfallCardNames {
+    pub object: String,
+    pub uri: String,
+    pub total_values: i32,
+    #[serde(alias = "data")]
+    pub names: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct CardPrinting {
+    pub set: String,
+    pub border_crop: String,
+    pub border_crop_back: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ScryfallCard {
+    pub name: String,
+    pub printing: CardPrinting,
+}
+
+impl ScryfallCard {
+    pub fn from_scryfall_object(d: serde_json::Map<String, Value>) -> Option<ScryfallCard> {
+        let n: String = d["name"].as_str()?.to_string();
+        let s = d["set"].as_str()?.to_string();
+        let (bc, bcb) = {
+            if d.contains_key("image_uris") {
+                (d["image_uris"]["border_crop"].as_str()?.to_string(), None)
+            } else if d.contains_key("card_faces") {
+                let card_faces = d["card_faces"].as_array()?;
+                if card_faces.len() != 2 {
+                    return None;
+                } else {
+                    (
+                        card_faces[0]["image_uris"]["border_crop"]
+                            .as_str()?
+                            .to_string(),
+                        Some(
+                            card_faces[1]["image_uris"]["border_crop"]
+                                .as_str()?
+                                .to_string(),
+                        ),
+                    )
+                }
+            } else {
+                return None;
+            }
+        };
+        return Some(ScryfallCard {
+            name: n,
+            printing: CardPrinting {
+                set: s,
+                border_crop: bc,
+                border_crop_back: bcb,
+            },
+        });
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
