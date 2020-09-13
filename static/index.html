@@ -1,9 +1,34 @@
-<form action="/decklist" method="GET">
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <title>Proxy Generator</title>
+</head>
+<form action="/create_pdf" method="GET">
     <p>
-        <textarea name="text" id="decklistid" placeholder="examples for recognized lines:
+        <textarea name="decklist" id="decklistid" placeholder="examples for recognized lines:
 mountain (RNA)
 2 plains [MMQ]
 2 expansion // explosion" rows="20" cols="40"></textarea>
     </p>
-    <button>Send</button>
+    <p>Should back sides be included?
+    <div>
+        <input type="radio" id="no_backside" name="backside" value="Zero" checked>
+        <label for="Zero">No back sides.</label>
+    </div>
+
+    <div>
+        <input type="radio" id="one_backside" name="backside" value="One">
+        <label for="One">One of each distinct back side in the list.</label>
+    </div>
+
+    <div>
+        <input type="radio" id="matching_backside" name="backside" value="Matching">
+        <label for="Matching">Match card multiplicity.</label>
+    </div>
+    </p>
+    <button style="font-size:large;">Create PDF</button>
 </form>
+
+</html>
