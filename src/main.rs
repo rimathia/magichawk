@@ -194,6 +194,14 @@ fn main() {
         }
         std::thread::sleep(std::time::Duration::from_secs(10 * 60));
     });
+    thread::spawn(|| loop {
+        let local_query = reqwest::blocking::get("http://localhost:8000/cache/purge");
+        match local_query {
+            Ok(response) => println!("local response to cache purge: {:?}", response.text()),
+            Err(e) => println!("error for local query for cache purge: {}", e),
+        }
+        std::thread::sleep(std::time::Duration::from_secs(24 * 60 * 60));
+    });
     magichawk::setup_logger().unwrap();
     rocket::ignite()
         .attach(AdHoc::on_attach("load card data from file", |rocket| {
