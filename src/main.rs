@@ -11,6 +11,7 @@ use rocket::{fairing::AdHoc, http::ContentType, response::Content, Response, Sta
 use rocket_contrib::serve::StaticFiles;
 use std::fs::File;
 use std::sync::Mutex;
+use std::thread;
 
 #[get("/create_pdf?<decklist>&<backside>")]
 fn create_pdf(
@@ -142,6 +143,17 @@ fn card_names_short(card_data_m: State<Mutex<magichawk::CardData>>) -> Content<S
     )
 }
 
+#[get("/card_names/update")]
+fn card_names_update(card_data_m: State<Mutex<magichawk::CardData>>) -> Content<String> {
+    Content(
+        ContentType::HTML,
+        match card_data_m.lock().unwrap().update_names() {
+            Some(_) => "card names updated".to_string(),
+            None => "couldn't update card names".to_string(),
+        },
+    )
+}
+
 #[get("/lookup")]
 fn lookup(card_data_m: State<Mutex<magichawk::CardData>>) -> Content<String> {
     let lookup = &card_data_m.lock().unwrap().lookup;
@@ -174,6 +186,14 @@ fn card_data_full(card_data_m: State<Mutex<magichawk::CardData>>) -> Content<Str
     )
 }
 fn main() {
+    thread::spawn(|| loop {
+        let local_query = reqwest::blocking::get("http://localhost:8000/card_names/update");
+        match local_query {
+            Ok(response) => println!("local response to card updates: {:?}", response.text()),
+            Err(e) => println!("error for local query for card update: {}", e),
+        }
+        std::thread::sleep(std::time::Duration::from_secs(10 * 60));
+    });
     magichawk::setup_logger().unwrap();
     rocket::ignite()
         .attach(AdHoc::on_attach("load card data from file", |rocket| {
@@ -190,6 +210,7 @@ fn main() {
         .mount("/", StaticFiles::from("static/"))
         .mount("/", routes![card_names_full])
         .mount("/", routes![card_names_short])
+        .mount("/", routes![card_names_update])
         .mount("/", routes![card_data_full])
         .mount("/", routes![card_data_short])
         .mount("/", routes![lookup])
