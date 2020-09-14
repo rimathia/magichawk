@@ -30,7 +30,7 @@ fn create_pdf(
         })
         .collect();
     let mut cache = image_cache.lock().unwrap();
-    let uris: Vec<(&magichawk::DecklistEntry, String, Option<String>)> = lookedup
+    let uris: Vec<(&magichawk::DecklistEntry, Option<String>, Option<String>)> = lookedup
         .iter()
         .filter_map(|entry| {
             let mut uris = card_data.lock().unwrap().get_uris(
@@ -49,18 +49,26 @@ fn create_pdf(
             } else {
                 None
             };
-            Some((entry, uris.0, uris.1))
+            let frontside = if backside == magichawk::BacksideMode::BackOnly && uris.1.is_some() {
+                None
+            } else {
+                Some(uris.0)
+            };
+            Some((entry, frontside, uris.1))
         })
         .collect();
 
     let mut expanded: Vec<&DynamicImage> = Vec::new();
-    for (entry, front, maybe_back) in uris.iter() {
-        match cache.get(front) {
-            Some(image) => {
-                for _i in 0..entry.multiple {
-                    expanded.push(image);
+    for (entry, maybe_front, maybe_back) in uris.iter() {
+        match maybe_front {
+            Some(front) => match cache.get(front) {
+                Some(image) => {
+                    for _i in 0..entry.multiple {
+                        expanded.push(image);
+                    }
                 }
-            }
+                None => {}
+            },
             None => {}
         }
         match maybe_back {
@@ -68,7 +76,7 @@ fn create_pdf(
                 Some(image) => match backside {
                     magichawk::BacksideMode::Zero => {}
                     magichawk::BacksideMode::One => expanded.push(image),
-                    magichawk::BacksideMode::Matching => {
+                    magichawk::BacksideMode::Matching | magichawk::BacksideMode::BackOnly => {
                         for _i in 0..entry.multiple {
                             expanded.push(image);
                         }
