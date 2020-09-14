@@ -383,6 +383,7 @@ pub enum BacksideMode {
     Zero,
     One,
     Matching,
+    BackOnly,
 }
 
 impl<'v> FromFormValue<'v> for BacksideMode {
@@ -395,6 +396,8 @@ impl<'v> FromFormValue<'v> for BacksideMode {
             Ok(BacksideMode::One)
         } else if form_value == "Matching" {
             Ok(BacksideMode::Matching)
+        } else if form_value == "BackOnly" {
+            Ok(BacksideMode::BackOnly)
         } else {
             Err(form_value)
         }
