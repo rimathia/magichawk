@@ -21,7 +21,7 @@ fn create_pdf(
     backside: magichawk::BacksideMode,
 ) -> Response<'static> {
     let parsed = magichawk::parse_decklist(&decklist);
-    let cards: Vec<(i32, i32, magichawk::ScryfallCard)> = parsed
+    let cards: Vec<magichawk::ImageLine> = parsed
         .iter()
         .filter_map(|line| {
             card_data
@@ -32,64 +32,27 @@ fn create_pdf(
         .collect();
 
     let mut cache = image_cache.lock().unwrap();
-    // let uris: Vec<(&magichawk::DecklistEntry, Option<String>, Option<String>)> = lookedup
-    //     .iter()
-    //     .filter_map(|entry| {
-    //         let mut uris = card_data.lock().unwrap().get_uris(
-    //             &entry.card.name,
-    //             entry.card.set.as_ref().map(|s| s.as_str()),
-    //         )?;
-    //         cache.ensure_contains(&uris.0)?;
-    //         uris.1 = if backside != magichawk::BacksideMode::Zero {
-    //             match uris.1 {
-    //                 Some(ref back) => match cache.ensure_contains(back) {
-    //                     Some(_) => uris.1,
-    //                     None => None,
-    //                 },
-    //                 None => None,
-    //             }
-    //         } else {
-    //             None
-    //         };
-    //         let frontside = if backside == magichawk::BacksideMode::BackOnly && uris.1.is_some() {
-    //             None
-    //         } else {
-    //             Some(uris.0)
-    //         };
-    //         Some((entry, frontside, uris.1))
-    //     })
-    //     .collect();
-    for (frontmult, backmult, card) in cards.iter() {
-        if *frontmult > 0 {
-            cache.ensure_contains(&card.printing.border_crop);
-        }
-        if *backmult > 0 {
-            match &card.printing.border_crop_back {
-                Some(uri) => {
-                    cache.ensure_contains(uri);
-                }
-                None => {}
-            }
-        }
+    for line in cards.iter() {
+        cache.ensure_contains_line(line);
     }
 
     let mut expanded: Vec<&DynamicImage> = Vec::new();
-    for (frontmult, backmult, card) in cards.iter() {
-        if *frontmult > 0 {
-            match cache.get(&card.printing.border_crop) {
+    for line in cards.iter() {
+        if line.front > 0 {
+            match cache.get(&line.card.printing.border_crop) {
                 Some(image) => {
-                    for _i in 0..*frontmult {
+                    for _i in 0..line.front {
                         expanded.push(image);
                     }
                 }
                 None => {}
             };
         }
-        if *backmult > 0 {
-            match &card.printing.border_crop_back {
+        if line.back > 0 {
+            match &line.card.printing.border_crop_back {
                 Some(uri) => match cache.get(uri) {
                     Some(image) => {
-                        for _i in 0..*backmult {
+                        for _i in 0..line.front {
                             expanded.push(image);
                         }
                     }

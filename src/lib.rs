@@ -162,19 +162,10 @@ impl ScryfallCard {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
-pub struct Card {
-    pub name: String,
-    pub set: Option<String>, // TODO: private
-}
-
-impl fmt::Display for Card {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match &self.set {
-            Some(set) => write!(f, "{} ({})", self.name, set),
-            None => write!(f, "{}", self.name),
-        }
-    }
+pub struct ImageLine {
+    pub card: ScryfallCard,
+    pub front: i32,
+    pub back: i32,
 }
 
 pub fn insert_scryfall_card(
@@ -259,7 +250,7 @@ impl CardData {
         &mut self,
         entry: &DecklistEntry,
         default_mode: BacksideMode,
-    ) -> Option<(i32, i32, ScryfallCard)> {
+    ) -> Option<ImageLine> {
         let namelookup = self.lookup.find(&entry.name)?;
         let backside = match namelookup.hit {
             NameMatchMode::SecondPart => BacksideMode::BackOnly,
@@ -287,28 +278,15 @@ impl CardData {
         } else {
             0
         };
-        Some((
-            frontmult,
-            backmult,
-            ScryfallCard {
+        Some(ImageLine {
+            front: frontmult,
+            back: backmult,
+            card: ScryfallCard {
                 name: namelookup.name,
                 printing: printing.clone(),
             },
-        ))
+        })
     }
-
-    // pub fn get_uris(&self, name: &str, set: Option<&str>) -> Option<(String, Option<String>)> {
-    //     let standard_name = self.lookup.find(name)?;
-    //     let p = self.printings.get(&standard_name)?;
-    //     let matching = p
-    //         .iter()
-    //         .find(|printing| printing.set == set.unwrap_or(""))
-    //         .unwrap_or(p.iter().next()?);
-    //     Some((
-    //         matching.border_crop.clone(),
-    //         matching.border_crop_back.clone(),
-    //     ))
-    // }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -423,17 +401,6 @@ impl<'v> FromFormValue<'v> for BacksideMode {
 
 pub fn encode_card_name(name: &str) -> String {
     name.replace(" ", "+")
-}
-
-pub fn query_image(card: &Card) -> Option<DynamicImage> {
-    let mut uri = format!(
-        "https://api.scryfall.com/cards/named?fuzzy={}&version=border_crop&format=image",
-        encode_card_name(card.name.as_str())
-    );
-    if card.set.is_some() {
-        uri += format!("&set={}", card.set.as_ref().unwrap()).as_str();
-    }
-    query_image_uri(uri.as_str())
 }
 
 pub fn query_image_uri(uri: &str) -> Option<DynamicImage> {
@@ -567,6 +534,20 @@ impl ScryfallCache {
                         None
                     }
                 }
+            }
+        }
+    }
+
+    pub fn ensure_contains_line(&mut self, line: &ImageLine) -> () {
+        if line.front > 0 {
+            self.ensure_contains(&line.card.printing.border_crop);
+        }
+        if line.back > 0 {
+            match &line.card.printing.border_crop_back {
+                Some(uri) => {
+                    self.ensure_contains(uri);
+                }
+                None => {}
             }
         }
     }
@@ -719,18 +700,6 @@ where
         }
     }
 }
-
-// pub fn decklist_to_pdf(cache: &mut ScryfallCache, decklist: &str) -> Option<Vec<u8>> {
-//     pages_to_pdf(
-//         parse_decklist(decklist)
-//             .into_iter()
-//             .flat_map(|parsed| parsed.entry.into_iter())
-//             .flat_map(expand_multiples)
-//             .map(|it| cache.query_image(&it))
-//             .flat_map(|e| e.into_iter())
-//             .batching(|it| images_to_page(it)),
-//     )
-// }
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum NameMatchMode {
