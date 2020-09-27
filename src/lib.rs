@@ -17,6 +17,7 @@ use image::{
 };
 use log::{debug, error, info};
 use ngrammatic::*;
+use ord_subset::OrdVar;
 use regex::Match;
 use regex::Regex;
 use rocket::{http::RawStr, request::FromFormValue};
@@ -26,7 +27,6 @@ use std::collections::{
     hash_map::Entry::{Occupied, Vacant},
     HashMap,
 };
-use std::convert::TryFrom;
 use std::fmt;
 use std::io::{Cursor, Read};
 use std::os::unix::ffi::OsStrExt;
@@ -112,7 +112,7 @@ pub struct ScryfallSearchAnswer {
     pub data: Vec<serde_json::Map<String, Value>>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CardPrinting {
     pub set: String,
     pub border_crop: String,
@@ -163,19 +163,10 @@ impl ScryfallCard {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
-pub struct Card {
-    pub name: String,
-    pub set: Option<String>, // TODO: private
-}
-
-impl fmt::Display for Card {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match &self.set {
-            Some(set) => write!(f, "{} ({})", self.name, set),
-            None => write!(f, "{}", self.name),
-        }
-    }
+pub struct ImageLine {
+    pub card: ScryfallCard,
+    pub front: i32,
+    pub back: i32,
 }
 
 pub fn insert_scryfall_card(
@@ -208,9 +199,9 @@ pub fn insert_scryfall_object(
 }
 
 pub struct CardData {
-    pub card_names: ScryfallCardNames,                 // TODO(private)
-    pub lookup: CardNameLookup,                        // TODO(private)
-    pub printings: HashMap<String, Vec<CardPrinting>>, // TODO(private)
+    pub card_names: ScryfallCardNames,
+    pub lookup: CardNameLookup,
+    pub printings: HashMap<String, Vec<CardPrinting>>,
 }
 
 impl CardData {
@@ -234,93 +225,105 @@ impl CardData {
         Some(())
     }
 
-    pub fn ensure_contains(&mut self, input_name: &str) -> Option<()> {
-        let look = self.lookup.find(input_name);
-        match look {
-            Some(name) => {
-                let entry = self.printings.entry(name);
-                match entry {
-                    Occupied(_) => {
-                        debug!(
-                            "there is card data for input name {} and standard name {}",
-                            input_name,
-                            entry.key()
-                        );
-                        Some(())
-                    }
-                    Vacant(token) => {
-                        let scryfall_objects = query_scryfall_by_name(token.key());
-                        match scryfall_objects {
-                            Some(ref objects) => {
-                                for object in objects.iter() {
-                                    insert_scryfall_object(
-                                        &mut self.printings,
-                                        &self.card_names,
-                                        object,
-                                    );
-                                }
-                                Some(())
-                            }
-                            None => {
-                                error!("querying scryfall for name {} failed", token.key());
-                                None
-                            }
+    fn ensure_contains(&mut self, lookup: &NameLookupResult) -> () {
+        let entry = self.printings.entry(lookup.name.clone());
+        match entry {
+            Occupied(_) => {
+                debug!("there is card data for name {}", entry.key());
+            }
+            Vacant(token) => {
+                let scryfall_objects = query_scryfall_by_name(token.key());
+                match scryfall_objects {
+                    Some(ref objects) => {
+                        for object in objects.iter() {
+                            insert_scryfall_object(&mut self.printings, &self.card_names, object);
                         }
+                    }
+                    None => {
+                        error!("querying scryfall for name {} failed", token.key());
                     }
                 }
             }
-            None => None,
         }
     }
 
-    pub fn get_uris(&self, name: &str, set: Option<&str>) -> Option<(String, Option<String>)> {
-        let standard_name = self.lookup.find(name)?;
-        let p = self.printings.get(&standard_name)?;
-        let matching = p
+    pub fn get_card(
+        &mut self,
+        entry: &DecklistEntry,
+        default_mode: BacksideMode,
+    ) -> Option<ImageLine> {
+        let namelookup = self.lookup.find(&entry.name)?;
+        debug!("namelookup in get_card: {:?}", namelookup);
+        let backside = match namelookup.hit {
+            NameMatchMode::Part(1) => BacksideMode::BackOnly,
+            _ => default_mode,
+        };
+        debug!("backside in get_card: {:?}", backside);
+        self.ensure_contains(&namelookup);
+        let matchingprintings = self.printings.get(&namelookup.name)?;
+        let printing = matchingprintings
             .iter()
-            .find(|printing| printing.set == set.unwrap_or(""))
-            .unwrap_or(p.iter().next()?);
-        Some((
-            matching.border_crop.clone(),
-            matching.border_crop_back.clone(),
-        ))
+            .find(|p| match &entry.set {
+                Some(s) => p.set == s.to_lowercase(),
+                None => false,
+            })
+            .unwrap_or(matchingprintings.iter().next()?);
+        let frontmult = if backside == BacksideMode::BackOnly && printing.border_crop_back.is_some()
+        {
+            0
+        } else {
+            entry.multiple
+        };
+        let backmult = if printing.border_crop_back.is_some() {
+            match backside {
+                BacksideMode::Zero => 0,
+                BacksideMode::One => 1,
+                BacksideMode::Matching | BacksideMode::BackOnly => entry.multiple,
+            }
+        } else {
+            0
+        };
+        debug!("frontmult: {}, backmult: {}", frontmult, backmult);
+        Some(ImageLine {
+            front: frontmult,
+            back: backmult,
+            card: ScryfallCard {
+                name: namelookup.name,
+                printing: printing.clone(),
+            },
+        })
     }
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct DecklistEntry {
     pub multiple: i32,
-    pub card: Card,
+    pub name: String,
+    pub set: Option<String>,
 }
 
 impl DecklistEntry {
     pub fn new(m: i32, n: &str, s: Option<&str>) -> DecklistEntry {
         DecklistEntry {
             multiple: m,
-            card: Card {
-                name: n.to_string(),
-                set: s.map(|x| x.to_string()),
-            },
+            name: n.to_string(),
+            set: s.map(|x| x.to_string()),
         }
     }
 
     pub fn from_name(n: &str) -> DecklistEntry {
         DecklistEntry {
             multiple: 1,
-            card: Card {
-                name: n.to_string(),
-                set: None,
-            },
+            name: n.to_string(),
+            set: None,
         }
     }
 
     pub fn from_multiple_name(m: i32, n: &str) -> DecklistEntry {
         DecklistEntry {
             multiple: m,
-            card: Card {
-                name: n.to_string(),
-                set: None,
-            },
+            name: n.to_string(),
+            set: None,
         }
     }
 }
@@ -351,16 +354,14 @@ fn parse_multiple(group: Option<Match>) -> i32 {
 pub fn parse_line(line: &str) -> Option<DecklistEntry> {
     lazy_static! {
         static ref REMNS: Regex =
-            Regex::new(r"^\s*(\d*)\s*([^\(\[\$\t]*)[\s\(\[]*([\dA-Z]{3})?").unwrap();
+            Regex::new(r"^\s*(\d*)\s*([^\(\[\$\t]*)[\s\(\[]*([\dA-Za-z]{3})?").unwrap();
     }
 
     match REMNS.captures(line) {
         Some(mns) => Some(DecklistEntry {
             multiple: parse_multiple(mns.get(1)),
-            card: Card {
-                name: mns.get(2)?.as_str().trim().to_string(),
-                set: parse_set(mns.get(3)).map(|s| s.to_string()),
-            },
+            name: mns.get(2)?.as_str().trim().to_string(),
+            set: parse_set(mns.get(3)).map(|s| s.to_string()),
         }),
         None => None,
     }
@@ -378,7 +379,7 @@ pub fn parse_decklist(decklist: &str) -> Vec<ParsedDecklistLine> {
         .collect()
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum BacksideMode {
     Zero,
     One,
@@ -405,18 +406,7 @@ impl<'v> FromFormValue<'v> for BacksideMode {
 }
 
 pub fn encode_card_name(name: &str) -> String {
-    name.replace(" ", "+")
-}
-
-pub fn query_image(card: &Card) -> Option<DynamicImage> {
-    let mut uri = format!(
-        "https://api.scryfall.com/cards/named?fuzzy={}&version=border_crop&format=image",
-        encode_card_name(card.name.as_str())
-    );
-    if card.set.is_some() {
-        uri += format!("&set={}", card.set.as_ref().unwrap()).as_str();
-    }
-    query_image_uri(uri.as_str())
+    name.replace(" ", "+").replace("//", "")
 }
 
 pub fn query_image_uri(uri: &str) -> Option<DynamicImage> {
@@ -554,6 +544,20 @@ impl ScryfallCache {
         }
     }
 
+    pub fn ensure_contains_line(&mut self, line: &ImageLine) -> () {
+        if line.front > 0 {
+            self.ensure_contains(&line.card.printing.border_crop);
+        }
+        if line.back > 0 {
+            match &line.card.printing.border_crop_back {
+                Some(uri) => {
+                    self.ensure_contains(uri);
+                }
+                None => {}
+            }
+        }
+    }
+
     pub fn get(&self, uri: &str) -> Option<&DynamicImage> {
         self.images.get(uri).map(|ci| &ci.image)
     }
@@ -575,10 +579,6 @@ impl ScryfallCache {
         self.last_purge = n;
         debug!("{} cached responses after purging", self.images.len());
     }
-}
-
-pub fn expand_multiples(entry: DecklistEntry) -> itertools::RepeatN<Card> {
-    itertools::repeat_n(entry.card, usize::try_from(entry.multiple).unwrap_or(0))
 }
 
 pub fn images_to_page<'a, I>(mut it: I) -> Option<RgbaImage>
@@ -707,31 +707,70 @@ where
     }
 }
 
-// pub fn decklist_to_pdf(cache: &mut ScryfallCache, decklist: &str) -> Option<Vec<u8>> {
-//     pages_to_pdf(
-//         parse_decklist(decklist)
-//             .into_iter()
-//             .flat_map(|parsed| parsed.entry.into_iter())
-//             .flat_map(expand_multiples)
-//             .map(|it| cache.query_image(&it))
-//             .flat_map(|e| e.into_iter())
-//             .batching(|it| images_to_page(it)),
-//     )
-// }
+#[derive(Debug, Eq, PartialEq, Hash, Clone, Copy, PartialOrd, Ord)]
+pub enum NameMatchMode {
+    Full,
+    Part(usize),
+}
+
+#[derive(Debug, Clone, PartialOrd, Ord, Eq, PartialEq)]
+pub struct CorpusLookupResult {
+    similarity: OrdVar<f32>,
+    name: String,
+}
+
+#[derive(Debug)]
+pub struct CardCorpus {
+    corpus: Corpus,
+    to_full: HashMap<String, String>,
+}
+
+impl CardCorpus {
+    const THRESHOLD: f32 = 0.25;
+
+    fn new() -> CardCorpus {
+        CardCorpus {
+            corpus: CorpusBuilder::new().finish(),
+            to_full: HashMap::new(),
+        }
+    }
+
+    pub fn insert(&mut self, partial_name: &str, full_name: &str) {
+        self.corpus.add_text(partial_name);
+        if partial_name != full_name {
+            self.to_full
+                .insert(partial_name.to_string(), full_name.to_string());
+        }
+    }
+
+    pub fn find(&self, name: &str) -> Option<CorpusLookupResult> {
+        let n = self
+            .corpus
+            .search(name, CardCorpus::THRESHOLD)
+            .into_iter()
+            .next()?;
+        Some(CorpusLookupResult {
+            name: self.to_full.get(n.text.as_str()).unwrap_or(&n.text).clone(),
+            similarity: OrdVar::new_checked(n.similarity)?,
+        })
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct NameLookupResult {
+    name: String,
+    hit: NameMatchMode,
+}
 
 #[derive(Debug)]
 pub struct CardNameLookup {
-    corpus: Corpus,
-    partial_to_full: HashMap<String, String>,
+    corpora: HashMap<NameMatchMode, CardCorpus>,
 }
 
 impl CardNameLookup {
-    const THRESHOLD: f32 = 0.25;
-
     fn new() -> CardNameLookup {
         CardNameLookup {
-            corpus: CorpusBuilder::new().finish(),
-            partial_to_full: HashMap::new(),
+            corpora: HashMap::new(),
         }
     }
 
@@ -745,30 +784,31 @@ impl CardNameLookup {
 
     fn insert(&mut self, name_uppercase: &str) {
         let name = name_uppercase.to_lowercase();
+        self.corpora
+            .entry(NameMatchMode::Full)
+            .or_insert(CardCorpus::new())
+            .insert(&name, &name);
+
         if name.contains("//") {
-            for part in name.split("//") {
-                self.corpus.add_text(part);
-                self.partial_to_full
-                    .insert(part.to_string(), name.to_string());
+            for (i, partial_name) in name.split("//").map(|s| s.trim()).enumerate() {
+                self.corpora
+                    .entry(NameMatchMode::Part(i))
+                    .or_insert(CardCorpus::new())
+                    .insert(partial_name, &name);
             }
-        } else {
-            self.corpus.add_text(&name);
         }
     }
 
-    pub fn find(&self, name: &str) -> Option<String> {
-        let best_match: String = self
-            .corpus
-            .search(name, CardNameLookup::THRESHOLD)
-            .into_iter()
-            .next()?
-            .text;
-        // let best_match = &matches.get(0)?.text;
-        let full = self.partial_to_full.get(&best_match);
-        match full {
-            Some(_) => full.map(|f| f.clone()),
-            None => Some(best_match),
-        }
+    pub fn find(&self, name: &str) -> Option<NameLookupResult> {
+        let best_match = self
+            .corpora
+            .iter()
+            .filter_map(|(mode, c)| Some((c.find(name)?, *mode)))
+            .max_by(|(leftres, _), (rightres, _)| leftres.similarity.cmp(&rightres.similarity))?;
+        Some(NameLookupResult {
+            name: best_match.0.name.clone(),
+            hit: best_match.1,
+        })
     }
 }
 
@@ -788,6 +828,14 @@ mod tests {
         assert_eq!(
             parse_line("2\tplains").unwrap(),
             DecklistEntry::from_multiple_name(2, "plains")
+        );
+    }
+
+    #[test]
+    fn shatter() {
+        assert_eq!(
+            parse_line("1 shatter [mrd]").unwrap(),
+            DecklistEntry::new(1, "shatter", Some("mrd"))
         );
     }
 
@@ -893,9 +941,31 @@ mod tests {
         let lookup = CardNameLookup::from_card_names(&card_names);
         assert_eq!(
             lookup.find("okaun"),
-            Some("okaun, eye of chaos".to_string())
+            Some(NameLookupResult {
+                name: "okaun, eye of chaos".to_string(),
+                hit: NameMatchMode::Full
+            })
         );
-        assert_eq!(lookup.find("cut"), Some("cut // ribbons".to_string()));
-        assert_eq!(lookup.find("ribbon"), Some("cut // ribbons".to_string()));
+        assert_eq!(
+            lookup.find("cut // ribbon"),
+            Some(NameLookupResult {
+                name: "cut // ribbons".to_string(),
+                hit: NameMatchMode::Full
+            })
+        );
+        assert_eq!(
+            lookup.find("cut"),
+            Some(NameLookupResult {
+                name: "cut // ribbons".to_string(),
+                hit: NameMatchMode::Part(0)
+            })
+        );
+        assert_eq!(
+            lookup.find("ribbon"),
+            Some(NameLookupResult {
+                name: "cut // ribbons".to_string(),
+                hit: NameMatchMode::Part(1)
+            })
+        );
     }
 }

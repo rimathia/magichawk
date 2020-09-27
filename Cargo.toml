@@ -1,6 +1,6 @@
 [package]
 name = "magichawk"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["Mathias Ritzmann <rimathia@users.noreply.github.com>"]
 edition = "2018"
 
@@ -12,6 +12,7 @@ itertools = "0.9"
 image = "0.23"
 lazy_static = "1.4"
 ngrammatic = ">=0.3"
+ord_subset = ">=3"
 regex = "1"
 rocket = "0.4.5"
 fern = "0.6"

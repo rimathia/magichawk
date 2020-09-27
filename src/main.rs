@@ -21,70 +21,45 @@ fn create_pdf(
     backside: magichawk::BacksideMode,
 ) -> Response<'static> {
     let parsed = magichawk::parse_decklist(&decklist);
-    let lookedup: Vec<magichawk::DecklistEntry> = parsed
+    let cards: Vec<magichawk::ImageLine> = parsed
         .iter()
         .filter_map(|line| {
-            let entry = line.as_entry()?;
-            card_data.lock().unwrap().ensure_contains(&entry.card.name);
-            Some(entry)
-        })
-        .collect();
-    let mut cache = image_cache.lock().unwrap();
-    let uris: Vec<(&magichawk::DecklistEntry, Option<String>, Option<String>)> = lookedup
-        .iter()
-        .filter_map(|entry| {
-            let mut uris = card_data.lock().unwrap().get_uris(
-                &entry.card.name,
-                entry.card.set.as_ref().map(|s| s.as_str()),
-            )?;
-            cache.ensure_contains(&uris.0)?;
-            uris.1 = if backside != magichawk::BacksideMode::Zero {
-                match uris.1 {
-                    Some(ref back) => match cache.ensure_contains(back) {
-                        Some(_) => uris.1,
-                        None => None,
-                    },
-                    None => None,
-                }
-            } else {
-                None
-            };
-            let frontside = if backside == magichawk::BacksideMode::BackOnly && uris.1.is_some() {
-                None
-            } else {
-                Some(uris.0)
-            };
-            Some((entry, frontside, uris.1))
+            card_data
+                .lock()
+                .unwrap()
+                .get_card(&line.as_entry()?, backside)
         })
         .collect();
 
+    let mut cache = image_cache.lock().unwrap();
+    for line in cards.iter() {
+        cache.ensure_contains_line(line);
+    }
+
     let mut expanded: Vec<&DynamicImage> = Vec::new();
-    for (entry, maybe_front, maybe_back) in uris.iter() {
-        match maybe_front {
-            Some(front) => match cache.get(front) {
+    for line in cards.iter() {
+        if line.front > 0 {
+            match cache.get(&line.card.printing.border_crop) {
                 Some(image) => {
-                    for _i in 0..entry.multiple {
+                    for _i in 0..line.front {
                         expanded.push(image);
                     }
                 }
                 None => {}
-            },
-            None => {}
+            };
         }
-        match maybe_back {
-            Some(back) => match cache.get(back) {
-                Some(image) => match backside {
-                    magichawk::BacksideMode::Zero => {}
-                    magichawk::BacksideMode::One => expanded.push(image),
-                    magichawk::BacksideMode::Matching | magichawk::BacksideMode::BackOnly => {
-                        for _i in 0..entry.multiple {
+        if line.back > 0 {
+            match &line.card.printing.border_crop_back {
+                Some(uri) => match cache.get(uri) {
+                    Some(image) => {
+                        for _i in 0..line.back {
                             expanded.push(image);
                         }
                     }
+                    None => {}
                 },
                 None => {}
-            },
-            None => {}
+            };
         }
     }
 
@@ -94,13 +69,6 @@ fn create_pdf(
             .batching(|it| magichawk::images_to_page(it)),
     );
 
-    //Response::build()
-    //    .header(ContentType::HTML)
-    //    .sized_body(Cursor::new(format!(
-    //        "parsed: {:?}\nbackside: {:?}\nlookedup: {:?}\nuris: {:?}",
-    //        parsed, backside, lookedup, uris
-    //    )))
-    //    .finalize()
     match pdf {
         Some(bytes) => Response::build()
             .header(ContentType::PDF)
