@@ -52,7 +52,7 @@ fn create_pdf(
             match &line.card.printing.border_crop_back {
                 Some(uri) => match cache.get(uri) {
                     Some(image) => {
-                        for _i in 0..line.front {
+                        for _i in 0..line.back {
                             expanded.push(image);
                         }
                     }

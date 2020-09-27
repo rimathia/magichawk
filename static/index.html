@@ -9,10 +9,15 @@
     <p>
         <textarea name="decklist" id="decklistid" placeholder="examples for recognized lines:
 mountain (RNA)
-2 plains [MMQ]
-2 expansion // explosion" rows="20" cols="40"></textarea>
+2 plains [5ed]
+2 expansion // explosion
+kabira plateau (will only print back side)" rows="20" cols="40"></textarea>
     </p>
-    <p>Should back sides be included?
+    <p>
+        <button style="font-size:large;">Create PDF</button>
+    </p>
+    <p>Should back sides be included? If only the back side is named on the list only the back side will be printed
+        anyway.
     <div>
         <input type="radio" id="no_backside" name="backside" value="Zero" checked>
         <label for="Zero">No back sides.</label>
@@ -30,8 +35,14 @@ mountain (RNA)
     <div>
         <input type="radio" id="only_backside" name="backside" value="BackOnly">
         <label for="BackOnly">Only include back side of double-sided cards.</label>
-    </div </p>
-    <button style="font-size:large;">Create PDF</button>
+    </div>
+    </p>
 </form>
+<p>
+    This server creates logs and exposes its query history. If your decklist is a state secret don't enter it here.
+</p>
+<p>
+    <a href=https://github.com/rimathia/magichawk>Source code</a>.
+</p>
 
 </html>

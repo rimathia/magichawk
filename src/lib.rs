@@ -17,6 +17,7 @@ use image::{
 };
 use log::{debug, error, info};
 use ngrammatic::*;
+use ord_subset::OrdVar;
 use regex::Match;
 use regex::Regex;
 use rocket::{http::RawStr, request::FromFormValue};
@@ -252,10 +253,12 @@ impl CardData {
         default_mode: BacksideMode,
     ) -> Option<ImageLine> {
         let namelookup = self.lookup.find(&entry.name)?;
+        debug!("namelookup in get_card: {:?}", namelookup);
         let backside = match namelookup.hit {
-            NameMatchMode::SecondPart => BacksideMode::BackOnly,
+            NameMatchMode::Part(1) => BacksideMode::BackOnly,
             _ => default_mode,
         };
+        debug!("backside in get_card: {:?}", backside);
         self.ensure_contains(&namelookup);
         let matchingprintings = self.printings.get(&namelookup.name)?;
         let printing = matchingprintings
@@ -265,9 +268,11 @@ impl CardData {
                 None => false,
             })
             .unwrap_or(matchingprintings.iter().next()?);
-        let frontmult = match backside {
-            BacksideMode::BackOnly => 0,
-            _ => entry.multiple,
+        let frontmult = if backside == BacksideMode::BackOnly && printing.border_crop_back.is_some()
+        {
+            0
+        } else {
+            entry.multiple
         };
         let backmult = if printing.border_crop_back.is_some() {
             match backside {
@@ -278,6 +283,7 @@ impl CardData {
         } else {
             0
         };
+        debug!("frontmult: {}, backmult: {}", frontmult, backmult);
         Some(ImageLine {
             front: frontmult,
             back: backmult,
@@ -400,7 +406,7 @@ impl<'v> FromFormValue<'v> for BacksideMode {
 }
 
 pub fn encode_card_name(name: &str) -> String {
-    name.replace(" ", "+")
+    name.replace(" ", "+").replace("//", "")
 }
 
 pub fn query_image_uri(uri: &str) -> Option<DynamicImage> {
@@ -701,11 +707,53 @@ where
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Hash, Clone, Copy, PartialOrd, Ord)]
 pub enum NameMatchMode {
-    FullName,
-    FirstPart,
-    SecondPart,
+    Full,
+    Part(usize),
+}
+
+#[derive(Debug, Clone, PartialOrd, Ord, Eq, PartialEq)]
+pub struct CorpusLookupResult {
+    similarity: OrdVar<f32>,
+    name: String,
+}
+
+#[derive(Debug)]
+pub struct CardCorpus {
+    corpus: Corpus,
+    to_full: HashMap<String, String>,
+}
+
+impl CardCorpus {
+    const THRESHOLD: f32 = 0.25;
+
+    fn new() -> CardCorpus {
+        CardCorpus {
+            corpus: CorpusBuilder::new().finish(),
+            to_full: HashMap::new(),
+        }
+    }
+
+    pub fn insert(&mut self, partial_name: &str, full_name: &str) {
+        self.corpus.add_text(partial_name);
+        if partial_name != full_name {
+            self.to_full
+                .insert(partial_name.to_string(), full_name.to_string());
+        }
+    }
+
+    pub fn find(&self, name: &str) -> Option<CorpusLookupResult> {
+        let n = self
+            .corpus
+            .search(name, CardCorpus::THRESHOLD)
+            .into_iter()
+            .next()?;
+        Some(CorpusLookupResult {
+            name: self.to_full.get(n.text.as_str()).unwrap_or(&n.text).clone(),
+            similarity: OrdVar::new_checked(n.similarity)?,
+        })
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -716,19 +764,13 @@ pub struct NameLookupResult {
 
 #[derive(Debug)]
 pub struct CardNameLookup {
-    corpus: Corpus,
-    first_to_full: HashMap<String, String>,
-    second_to_full: HashMap<String, String>,
+    corpora: HashMap<NameMatchMode, CardCorpus>,
 }
 
 impl CardNameLookup {
-    const THRESHOLD: f32 = 0.25;
-
     fn new() -> CardNameLookup {
         CardNameLookup {
-            corpus: CorpusBuilder::new().finish(),
-            first_to_full: HashMap::new(),
-            second_to_full: HashMap::new(),
+            corpora: HashMap::new(),
         }
     }
 
@@ -742,49 +784,31 @@ impl CardNameLookup {
 
     fn insert(&mut self, name_uppercase: &str) {
         let name = name_uppercase.to_lowercase();
+        self.corpora
+            .entry(NameMatchMode::Full)
+            .or_insert(CardCorpus::new())
+            .insert(&name, &name);
+
         if name.contains("//") {
-            let parts: Vec<&str> = name.split("//").map(|s| s.trim()).collect();
-            if parts.len() == 2 {
-                self.corpus.add_text(parts[0]);
-                self.first_to_full
-                    .insert(parts[0].to_string(), name.to_string());
-                self.corpus.add_text(parts[1]);
-                self.second_to_full
-                    .insert(parts[1].to_string(), name.to_string());
+            for (i, partial_name) in name.split("//").map(|s| s.trim()).enumerate() {
+                self.corpora
+                    .entry(NameMatchMode::Part(i))
+                    .or_insert(CardCorpus::new())
+                    .insert(partial_name, &name);
             }
-        } else {
-            self.corpus.add_text(&name);
         }
     }
 
     pub fn find(&self, name: &str) -> Option<NameLookupResult> {
-        let best_match: String = self
-            .corpus
-            .search(name, CardNameLookup::THRESHOLD)
-            .into_iter()
-            .next()?
-            .text;
-        match self.first_to_full.get(&best_match) {
-            Some(full) => {
-                return Some(NameLookupResult {
-                    name: full.clone(),
-                    hit: NameMatchMode::FirstPart,
-                })
-            }
-            None => (),
-        }
-        match self.second_to_full.get(&best_match) {
-            Some(full) => {
-                return Some(NameLookupResult {
-                    name: full.clone(),
-                    hit: NameMatchMode::SecondPart,
-                })
-            }
-            None => Some(NameLookupResult {
-                name: best_match,
-                hit: NameMatchMode::FullName,
-            }),
-        }
+        let best_match = self
+            .corpora
+            .iter()
+            .filter_map(|(mode, c)| Some((c.find(name)?, *mode)))
+            .max_by(|(leftres, _), (rightres, _)| leftres.similarity.cmp(&rightres.similarity))?;
+        Some(NameLookupResult {
+            name: best_match.0.name.clone(),
+            hit: best_match.1,
+        })
     }
 }
 
@@ -919,21 +943,28 @@ mod tests {
             lookup.find("okaun"),
             Some(NameLookupResult {
                 name: "okaun, eye of chaos".to_string(),
-                hit: NameMatchMode::FullName
+                hit: NameMatchMode::Full
+            })
+        );
+        assert_eq!(
+            lookup.find("cut // ribbon"),
+            Some(NameLookupResult {
+                name: "cut // ribbons".to_string(),
+                hit: NameMatchMode::Full
             })
         );
         assert_eq!(
             lookup.find("cut"),
             Some(NameLookupResult {
                 name: "cut // ribbons".to_string(),
-                hit: NameMatchMode::FirstPart
+                hit: NameMatchMode::Part(0)
             })
         );
         assert_eq!(
             lookup.find("ribbon"),
             Some(NameLookupResult {
                 name: "cut // ribbons".to_string(),
-                hit: NameMatchMode::SecondPart
+                hit: NameMatchMode::Part(1)
             })
         );
     }
