@@ -295,6 +295,17 @@ impl CardData {
     }
 }
 
+pub fn image_lines_from_decklist(
+    parsed: Vec<ParsedDecklistLine>,
+    card_data: &mut CardData,
+    default_backside_mode: BacksideMode,
+) -> Vec<ImageLine> {
+    parsed
+        .iter()
+        .filter_map(|line| card_data.get_card(&line.as_entry()?, default_backside_mode))
+        .collect()
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct DecklistEntry {
     pub multiple: i32,
@@ -358,11 +369,26 @@ pub fn parse_line(line: &str) -> Option<DecklistEntry> {
     }
 
     match REMNS.captures(line) {
-        Some(mns) => Some(DecklistEntry {
-            multiple: parse_multiple(mns.get(1)),
-            name: mns.get(2)?.as_str().trim().to_string(),
-            set: parse_set(mns.get(3)).map(|s| s.to_string()),
-        }),
+        Some(mns) => {
+            let multiple = parse_multiple(mns.get(1));
+            let name = mns.get(2)?.as_str().trim().to_string();
+            let set = parse_set(mns.get(3)).map(|s| s.to_string());
+            let name_lowercase = name.to_lowercase();
+            let non_entries = vec!["deck", "decklist", "sideboard"];
+            if non_entries
+                .iter()
+                .find(|s| ***s == name_lowercase)
+                .is_some()
+            {
+                None
+            } else {
+                Some(DecklistEntry {
+                    multiple: multiple,
+                    name: name,
+                    set: set,
+                })
+            }
+        }
         None => None,
     }
 }
@@ -799,12 +825,14 @@ impl CardNameLookup {
         }
     }
 
-    pub fn find(&self, name: &str) -> Option<NameLookupResult> {
+    pub fn find(&self, name_uppercase: &str) -> Option<NameLookupResult> {
+        let name = name_uppercase.to_lowercase();
         let best_match = self
             .corpora
             .iter()
-            .filter_map(|(mode, c)| Some((c.find(name)?, *mode)))
+            .filter_map(|(mode, c)| Some((c.find(&name)?, *mode)))
             .max_by(|(leftres, _), (rightres, _)| leftres.similarity.cmp(&rightres.similarity))?;
+        debug!("similarity of best match: {:?}", best_match.0.similarity);
         Some(NameLookupResult {
             name: best_match.0.name.clone(),
             hit: best_match.1,
@@ -915,7 +943,7 @@ mod tests {
         let expected = vec![
             ParsedDecklistLine {
                 line: "Deck",
-                entry: Some(DecklistEntry::from_multiple_name(1, "Deck")),
+                entry: None,
             },
             ParsedDecklistLine {
                 line: "1 Bedeck // Bedazzle (RNA) 221",
@@ -930,6 +958,50 @@ mod tests {
         for (left, right) in parsed.iter().zip(expected.iter()) {
             assert_eq!(left, right);
         }
+    }
+
+    #[test]
+    fn arenaexport2() {
+        let decklist = "Deck\n1 Defiant Strike (M21) 15\n24 Plains (ANB) 115\n\nSideboard\n2 Faerie Guidemother (ELD) 11";
+        let expected = vec![
+            ParsedDecklistLine {
+                line: "Deck",
+                entry: None,
+            },
+            ParsedDecklistLine {
+                line: "1 Defiant Strike (M21) 15",
+                entry: Some(DecklistEntry::new(1, "Defiant Strike", Some("M21"))),
+            },
+            ParsedDecklistLine {
+                line: "24 Plains (ANB) 115",
+                entry: Some(DecklistEntry::new(24, "Plains", Some("ANB"))),
+            },
+            ParsedDecklistLine {
+                line: "Sideboard",
+                entry: None,
+            },
+            ParsedDecklistLine {
+                line: "2 Faerie Guidemother (ELD) 11",
+                entry: Some(DecklistEntry::new(2, "Faerie Guidemother", Some("ELD"))),
+            },
+        ];
+        let parsed = parse_decklist(decklist);
+        for (left, right) in parsed.iter().zip(expected.iter()) {
+            assert_eq!(left, right);
+        }
+
+        // not necessary anymore because we filter out the lines "deck" and "sideboard" manually now
+        // let mut card_data = CardData::from_bulk(
+        //     serde_json::from_reader(
+        //         //serde_json::from_reader::<HashMap<String, Vec<CardPrinting>>(
+        //         std::fs::File::open("assets/card_data.json").unwrap(),
+        //     )
+        //     .unwrap(),
+        // )
+        // .unwrap();
+
+        // let imagelines = image_lines_from_decklist(parsed, &mut card_data, BacksideMode::One);
+        // assert_eq!(imagelines.len(), 3);
     }
 
     #[test]

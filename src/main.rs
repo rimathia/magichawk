@@ -21,15 +21,8 @@ fn create_pdf(
     backside: magichawk::BacksideMode,
 ) -> Response<'static> {
     let parsed = magichawk::parse_decklist(&decklist);
-    let cards: Vec<magichawk::ImageLine> = parsed
-        .iter()
-        .filter_map(|line| {
-            card_data
-                .lock()
-                .unwrap()
-                .get_card(&line.as_entry()?, backside)
-        })
-        .collect();
+    let mut cd = card_data.lock().unwrap();
+    let cards = magichawk::image_lines_from_decklist(parsed, &mut cd, backside);
 
     let mut cache = image_cache.lock().unwrap();
     for line in cards.iter() {
