@@ -12,7 +12,7 @@ extern crate serde_json;
 use chrono::{DateTime, Utc};
 use image::{
     imageops::overlay,
-    jpeg::{JPEGEncoder, PixelDensity, PixelDensityUnit},
+    jpeg::{JpegEncoder, PixelDensity, PixelDensityUnit},
     DynamicImage, GenericImage, GenericImageView, ImageResult, Rgba, RgbaImage,
 };
 use log::{debug, error, info};
@@ -589,11 +589,12 @@ impl ScryfallCache {
     }
 
     pub fn list(&self) -> String {
-        let mut desc: String = "<ul>".to_string();
+        let mut desc: String = format!("last purged at {}", self.last_purge);
+        desc += "<table>\n<tbody>";
         for (key, value) in &self.images {
-            desc.push_str(format!("<li>{}: {:?}</li>", key, value).as_str());
+            desc.push_str(format!("<tr><td>{}</td><td>{:?}</td></tr>\n", key, value).as_str());
         }
-        desc.push_str("</ul>");
+        desc += "\n</tbody>\n</table>";
         desc
     }
 
@@ -647,7 +648,7 @@ where
 pub fn encode_jpeg<I: GenericImageView>(im: &I) -> ImageResult<Vec<u8>> {
     let mut outputbuffer: Vec<u8> = vec![];
     let mut outputcursor = Cursor::new(&mut outputbuffer);
-    let mut encoder = JPEGEncoder::new_with_quality(&mut outputcursor, 100);
+    let mut encoder = JpegEncoder::new_with_quality(&mut outputcursor, 100);
     let image_px_per_cm: u16 = ((IMAGE_HEIGHT as f64) / IMAGE_HEIGHT_CM).round() as u16;
 
     let image_dpi: PixelDensity = PixelDensity {
