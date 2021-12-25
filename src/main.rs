@@ -15,7 +15,7 @@ use magichawk::ScryfallClient;
 async fn create_pdf(
     image_cache: &State<Mutex<magichawk::ScryfallCache>>,
     card_data: &State<Mutex<magichawk::CardData>>,
-    client: &State<magichawk::ScryfallClient>,
+    client: &State<ScryfallClient>,
     decklist: String,
     backside: magichawk::BacksideMode,
 ) -> (rocket::http::Status, (rocket::http::ContentType, Vec<u8>)) {
@@ -125,7 +125,7 @@ async fn card_names_short(
 #[get("/card_names/update")]
 async fn card_names_update(
     card_data_m: &State<Mutex<magichawk::CardData>>,
-    client: &State<magichawk::ScryfallClient>,
+    client: &State<ScryfallClient>,
 ) -> content::Html<String> {
     content::Html(match card_data_m.lock().await.update_names(client).await {
         Some(_) => "card names updated".to_string(),

@@ -32,8 +32,7 @@ use std::fmt;
 use std::io::{Cursor, Read};
 use std::os::unix::ffi::OsStrExt;
 use std::string::String;
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use Option::{None, Some};
 
 mod scryfall;
@@ -51,41 +50,24 @@ pub const IMAGE_HEIGHT_CM: f64 = 8.7;
 pub const IMAGE_WIDTH_CM: f64 = IMAGE_HEIGHT_CM * IMAGE_WIDTH as f64 / IMAGE_HEIGHT as f64;
 
 pub const SCRYFALL_COOLDOWN: Duration = Duration::from_millis(100);
-lazy_static! {
-    static ref LAST_SCRYFALL_CALL: Mutex<Instant> = Mutex::new(Instant::now() - SCRYFALL_COOLDOWN);
-}
 
-// pub fn scryfall_call(uri: &str) -> reqwest::Result<reqwest::blocking::Response> {
-//     let mut last_call = LAST_SCRYFALL_CALL.lock().unwrap();
-//     let mut n = Instant::now();
-//     if n - *last_call < SCRYFALL_COOLDOWN {
-//         debug!("waiting before next scryfall call");
-//         std::thread::sleep(SCRYFALL_COOLDOWN - (n - *last_call));
-//     } else {
-//         debug!("last scryfall call was {:?} ago", n - *last_call);
-//         n = Instant::now();
-//     }
-//     *last_call = n;
-//     reqwest::blocking::get(uri)
+// pub fn setup_logger() -> Result<(), fern::InitError> {
+//     fern::Dispatch::new()
+//         .format(|out, message, record| {
+//             out.finish(format_args!(
+//                 "{}[{}][{}] {}",
+//                 chrono::Utc::now().format("[%Y-%m-%d][%H:%M:%S]"),
+//                 record.target(),
+//                 record.level(),
+//                 message
+//             ))
+//         })
+//         .level(log::LevelFilter::Debug)
+//         .chain(std::io::stdout())
+//         .chain(fern::log_file("output.log")?)
+//         .apply()?;
+//     Ok(())
 // }
-
-pub fn setup_logger() -> Result<(), fern::InitError> {
-    fern::Dispatch::new()
-        .format(|out, message, record| {
-            out.finish(format_args!(
-                "{}[{}][{}] {}",
-                chrono::Utc::now().format("[%Y-%m-%d][%H:%M:%S]"),
-                record.target(),
-                record.level(),
-                message
-            ))
-        })
-        .level(log::LevelFilter::Debug)
-        .chain(std::io::stdout())
-        .chain(fern::log_file("output.log")?)
-        .apply()?;
-    Ok(())
-}
 
 #[derive(Serialize, Deserialize)]
 pub struct ScryfallCardNames {
