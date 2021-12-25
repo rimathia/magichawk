@@ -1,32 +1,31 @@
-#![feature(proc_macro_hygiene, decl_macro)]
-
 #[macro_use]
 extern crate rocket;
-extern crate rocket_contrib;
 extern crate serde_json;
 
 use image::DynamicImage;
 use itertools::Itertools;
-use rocket::{fairing::AdHoc, http::ContentType, response::Content, Response, State};
-use rocket_contrib::serve::StaticFiles;
+use rocket::http::{ContentType, Status};
+use rocket::{fairing::AdHoc, fs::relative, fs::FileServer, response::content, State};
 use std::fs::File;
-use std::sync::Mutex;
-use std::thread;
+use tokio::sync::Mutex;
+
+use magichawk::ScryfallClient;
 
 #[get("/create_pdf?<decklist>&<backside>")]
-fn create_pdf(
-    image_cache: State<Mutex<magichawk::ScryfallCache>>,
-    card_data: State<Mutex<magichawk::CardData>>,
+async fn create_pdf(
+    image_cache: &State<Mutex<magichawk::ScryfallCache>>,
+    card_data: &State<Mutex<magichawk::CardData>>,
+    client: &State<magichawk::ScryfallClient>,
     decklist: String,
     backside: magichawk::BacksideMode,
-) -> Response<'static> {
+) -> (rocket::http::Status, (rocket::http::ContentType, Vec<u8>)) {
     let parsed = magichawk::parse_decklist(&decklist);
-    let mut cd = card_data.lock().unwrap();
-    let cards = magichawk::image_lines_from_decklist(parsed, &mut cd, backside);
+    let mut cd = card_data.lock().await;
+    let cards = magichawk::image_lines_from_decklist(parsed, &mut cd, backside, client).await;
 
-    let mut cache = image_cache.lock().unwrap();
+    let mut cache = image_cache.lock().await;
     for line in cards.iter() {
-        cache.ensure_contains_line(line);
+        cache.ensure_contains_line(line, client).await;
     }
 
     let mut expanded: Vec<&DynamicImage> = Vec::new();
@@ -56,6 +55,11 @@ fn create_pdf(
         }
     }
 
+    if expanded.len() == 0 {
+        let message: Vec<u8> = "no card names have been recognized".as_bytes().to_vec();
+        return (Status::BadRequest, (ContentType::Plain, message));
+    }
+
     let pdf = magichawk::pages_to_pdf(
         expanded
             .into_iter()
@@ -63,128 +67,181 @@ fn create_pdf(
     );
 
     match pdf {
-        Some(bytes) => Response::build()
-            .header(ContentType::PDF)
-            .sized_body(std::io::Cursor::new(bytes))
-            .finalize(),
-        None => Response::build().header(ContentType::HTML).finalize(),
+        Some(bytes) => {
+            info!("sending out pdf with size {}", bytes.len());
+            return (Status::Ok, (ContentType::PDF, bytes));
+        }
+        None => {
+            let message: Vec<u8> = "internal server error (sorry)".as_bytes().to_vec();
+            return (Status::InternalServerError, (ContentType::Plain, message));
+        }
     }
 }
 
 #[get("/cache/list")]
-fn list_cache(state: State<Mutex<magichawk::ScryfallCache>>) -> Content<String> {
-    Content(ContentType::HTML, state.lock().unwrap().list())
+async fn list_cache(state: &State<Mutex<magichawk::ScryfallCache>>) -> content::Html<String> {
+    content::Html(state.lock().await.list())
 }
 
 #[get("/cache/purge?<age_seconds>")]
-fn purge_cache(
-    state: State<Mutex<magichawk::ScryfallCache>>,
+async fn purge_cache(
+    state: &State<Mutex<magichawk::ScryfallCache>>,
     age_seconds: Option<i64>,
-) -> Content<String> {
+) -> content::Html<String> {
     state
         .lock()
-        .unwrap()
+        .await
         .purge(age_seconds.map(|s| chrono::Duration::seconds(s)));
-    list_cache(state)
+    list_cache(state).await
 }
 
 #[get("/card_names/full")]
-fn card_names_full(card_data_m: State<Mutex<magichawk::CardData>>) -> Content<String> {
-    let card_names = &card_data_m.lock().unwrap().card_names;
-    Content(
-        ContentType::JSON,
-        serde_json::to_string(card_names).unwrap(),
-    )
+async fn card_names_full(card_data_m: &State<Mutex<magichawk::CardData>>) -> content::Json<String> {
+    let card_names = &card_data_m.lock().await.card_names;
+    let serialized: String = serde_json::to_string_pretty(card_names).unwrap();
+    content::Json(serialized)
 }
 
 #[get("/card_names/short")]
-fn card_names_short(card_data_m: State<Mutex<magichawk::CardData>>) -> Content<String> {
-    let names = &card_data_m.lock().unwrap().card_names.names;
-    Content(
-        ContentType::HTML,
-        format!(
-            "There are {} card names, the first three are {:?}, {:?}, {:?}",
-            names.len(),
-            names.get(0),
-            names.get(1),
-            names.get(2),
-        ),
-    )
+async fn card_names_short(
+    card_data_m: &State<Mutex<magichawk::CardData>>,
+) -> content::Html<String> {
+    let card_names = &card_data_m.lock().await.card_names;
+    let names = &card_names.names;
+    let update: String = match card_names.date {
+        Some(date) => date.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+        None => "not present (this indicates a bug)".to_string(),
+    };
+    content::Html(format!(
+        "There are {} card names, last update approximately {}, the first three are {:?}, {:?}, {:?}",
+        names.len(),
+        update,
+        names.get(0),
+        names.get(1),
+        names.get(2),
+    ))
 }
 
 #[get("/card_names/update")]
-fn card_names_update(card_data_m: State<Mutex<magichawk::CardData>>) -> Content<String> {
-    Content(
-        ContentType::HTML,
-        match card_data_m.lock().unwrap().update_names() {
-            Some(_) => "card names updated".to_string(),
-            None => "couldn't update card names".to_string(),
-        },
-    )
+async fn card_names_update(
+    card_data_m: &State<Mutex<magichawk::CardData>>,
+    client: &State<magichawk::ScryfallClient>,
+) -> content::Html<String> {
+    content::Html(match card_data_m.lock().await.update_names(client).await {
+        Some(_) => "card names updated".to_string(),
+        None => "couldn't update card names".to_string(),
+    })
 }
 
 #[get("/lookup")]
-fn lookup(card_data_m: State<Mutex<magichawk::CardData>>) -> Content<String> {
-    let lookup = &card_data_m.lock().unwrap().lookup;
-    Content(ContentType::HTML, format!("{:?}", lookup))
+async fn lookup(card_data_m: &State<Mutex<magichawk::CardData>>) -> content::Html<String> {
+    let lookup = &card_data_m.lock().await.lookup;
+    content::Html(format!("{:?}", lookup))
 }
 
 #[get("/card_data/short")]
-fn card_data_short(card_data_m: State<Mutex<magichawk::CardData>>) -> Content<String> {
-    let card_data = card_data_m.lock().unwrap();
-    Content(
-        ContentType::HTML,
-        format!(
-            "There are {} different card names and {} (card name, set) combinations",
-            card_data.printings.len(),
-            card_data
-                .printings
-                .iter()
-                .map(|(_name, printings)| printings.len())
-                .sum::<usize>()
-        ),
-    )
+async fn card_data_short(card_data_m: &State<Mutex<magichawk::CardData>>) -> content::Html<String> {
+    let card_data = card_data_m.lock().await;
+    content::Html(format!(
+        "There are {} different card names and {} (card name, set) combinations",
+        card_data.printings.len(),
+        card_data
+            .printings
+            .iter()
+            .map(|(_name, printings)| printings.len())
+            .sum::<usize>()
+    ))
 }
 
 #[get("/card_data/full")]
-fn card_data_full(card_data_m: State<Mutex<magichawk::CardData>>) -> Content<String> {
-    let card_data = card_data_m.lock().unwrap();
-    Content(
-        ContentType::JSON,
-        serde_json::to_string(&card_data.printings).unwrap(),
-    )
+async fn card_data_full(card_data_m: &State<Mutex<magichawk::CardData>>) -> content::Json<String> {
+    let card_data = card_data_m.lock().await;
+    let serialized: String = serde_json::to_string_pretty(&card_data.printings).unwrap();
+    content::Json(serialized)
 }
-fn main() {
-    thread::spawn(|| loop {
-        let local_query = reqwest::blocking::get("http://localhost:8000/card_names/update");
-        match local_query {
-            Ok(response) => println!("local response to card updates: {:?}", response.text()),
-            Err(e) => println!("error for local query for card update: {}", e),
-        }
-        std::thread::sleep(std::time::Duration::from_secs(10 * 60));
-    });
-    thread::spawn(|| loop {
-        let local_query = reqwest::blocking::get("http://localhost:8000/cache/purge");
-        match local_query {
-            Ok(response) => println!("local response to cache purge: {:?}", response.text()),
-            Err(e) => println!("error for local query for cache purge: {}", e),
-        }
-        std::thread::sleep(std::time::Duration::from_secs(24 * 60 * 60));
-    });
-    magichawk::setup_logger().unwrap();
-    rocket::ignite()
-        .attach(AdHoc::on_attach("load card data from file", |rocket| {
-            let bulk: std::collections::HashMap<String, Vec<magichawk::CardPrinting>> =
-                serde_json::from_reader(
-                    File::open(rocket.config().get_str("card_data").unwrap()).unwrap(),
-                )
-                .unwrap();
-            Ok(rocket.manage(Mutex::new(magichawk::CardData::from_bulk(bulk).unwrap())))
+
+#[derive(Debug, rocket::serde::Deserialize)]
+struct AppConfig {
+    card_data: String,
+}
+
+#[launch]
+fn rocket() -> _ {
+    rocket::build()
+        .attach(AdHoc::config::<AppConfig>())
+        .attach(AdHoc::on_liftoff(
+            "create trigger for update of card names",
+            |_| {
+                Box::pin(async move {
+                    tokio::task::spawn((|| async {
+                        let client = reqwest::Client::new();
+                        let interval = std::time::Duration::from_secs(10 * 60);
+                        let mut wakeup_time = tokio::time::Instant::now() + interval;
+                        loop {
+                            tokio::time::sleep_until(wakeup_time).await;
+                            wakeup_time += interval;
+                            info!("trigger update of card names");
+                            match client
+                                .get("http://localhost:8000/card_names/update")
+                                .send()
+                                .await
+                            {
+                                Ok(_response) => {
+                                    info!("response to triggering card name update ok");
+                                }
+                                Err(e) => {
+                                    error!("error when trying to trigger card name update: {}", e);
+                                }
+                            }
+                        }
+                    })());
+                })
+            },
+        ))
+        .attach(AdHoc::on_liftoff(
+            "create trigger for purging cache",
+            |_| {
+                Box::pin(async move {
+                    tokio::task::spawn((|| async {
+                        let client = reqwest::Client::new();
+                        let interval = std::time::Duration::from_secs(24 * 60 * 60);
+                        let mut wakeup_time = tokio::time::Instant::now() + interval;
+                        loop {
+                            tokio::time::sleep_until(wakeup_time).await;
+                            wakeup_time += interval;
+                            info!("trigger cache purge");
+                            match client.get("http://localhost:8000/cache/purge").send().await {
+                                Ok(_response) => {
+                                    info!("response to triggering cache purge ok");
+                                }
+                                Err(e) => {
+                                    error!("error when trying to trigger cache purge: {}", e);
+                                }
+                            }
+                        }
+                    })());
+                })
+            },
+        ))
+        .attach(AdHoc::on_ignite("create reqwest client", |rocket| async {
+            rocket.manage(ScryfallClient::new())
         }))
-        .attach(AdHoc::on_attach("create image cache", |rocket| {
-            Ok(rocket.manage(Mutex::new(magichawk::ScryfallCache::new())))
+        .attach(AdHoc::on_ignite(
+            "load card data from file",
+            |rocket| async {
+                let file_name = rocket.state::<AppConfig>().unwrap().card_data.clone();
+                let file_handle = File::open(file_name).unwrap();
+                let bulk: magichawk::Printings = serde_json::from_reader(file_handle).unwrap();
+
+                let client = rocket.state::<ScryfallClient>().unwrap();
+                let card_data = magichawk::CardData::from_bulk(bulk, client).await.unwrap();
+                rocket.manage(Mutex::new(card_data))
+            },
+        ))
+        .attach(AdHoc::on_ignite("create image cache", |rocket| async {
+            rocket.manage(Mutex::new(magichawk::ScryfallCache::new()))
         }))
-        .mount("/", StaticFiles::from("static/"))
+        .mount("/", FileServer::from(relative!("static/")))
         .mount("/", routes![card_names_full])
         .mount("/", routes![card_names_short])
         .mount("/", routes![card_names_update])
@@ -194,5 +251,4 @@ fn main() {
         .mount("/", routes![create_pdf])
         .mount("/", routes![list_cache])
         .mount("/", routes![purge_cache])
-        .launch();
 }

@@ -1,4 +1,4 @@
-use clap::Clap;
+use clap::Parser;
 use magichawk::{CardPrinting, ScryfallCardNames};
 use serde_json::{from_reader, Value};
 use std::fs::File;
@@ -6,8 +6,7 @@ use std::fs::File;
 /// Process a bulk "Default Cards" file from the Scryfall API into a card data file for magichawk,
 /// see https://scryfall.com/docs/api/bulk-data for the bulk data.
 /// The bulk data list of different card names from the Scryfall API is used to exclude tokens.
-#[derive(Clap)]
-#[clap(version = "0.1")]
+#[derive(Parser, Debug)]
 struct Opts {
     /// bulk "Default Cards" input filename
     input: String,
@@ -16,11 +15,11 @@ struct Opts {
 }
 
 fn main() {
-    let opts: Opts = Opts::parse();
+    let opts = Opts::parse();
 
-    let nontoken_names = ScryfallCardNames::from_api_call().unwrap();
+    let nontoken_names = ScryfallCardNames::from_api_call_blocking().unwrap();
     println!(
-        "There are {} names, the first is {}",
+        "There are {} card names, the first is {}",
         nontoken_names.names.len(),
         nontoken_names.names[0]
     );

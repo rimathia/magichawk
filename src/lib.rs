@@ -8,6 +8,7 @@ extern crate reqwest;
 extern crate rocket;
 extern crate serde;
 extern crate serde_json;
+extern crate tokio;
 
 use chrono::{DateTime, Utc};
 use image::{
@@ -20,7 +21,7 @@ use ngrammatic::*;
 use ord_subset::OrdVar;
 use regex::Match;
 use regex::Regex;
-use rocket::{http::RawStr, request::FromFormValue};
+use rocket::form::FromFormField;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{
@@ -34,6 +35,9 @@ use std::string::String;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use Option::{None, Some};
+
+mod scryfall;
+pub use crate::scryfall::ScryfallClient;
 
 pub const SCRYFALL_CARD_NAMES: &'static str = "https://api.scryfall.com/catalog/card-names";
 
@@ -51,19 +55,19 @@ lazy_static! {
     static ref LAST_SCRYFALL_CALL: Mutex<Instant> = Mutex::new(Instant::now() - SCRYFALL_COOLDOWN);
 }
 
-pub fn scryfall_call(uri: &str) -> reqwest::Result<reqwest::blocking::Response> {
-    let mut last_call = LAST_SCRYFALL_CALL.lock().unwrap();
-    let mut n = Instant::now();
-    if n - *last_call < SCRYFALL_COOLDOWN {
-        debug!("waiting before next scryfall call");
-        std::thread::sleep(SCRYFALL_COOLDOWN - (n - *last_call));
-    } else {
-        debug!("last scryfall call was {:?} ago", n - *last_call);
-        n = Instant::now();
-    }
-    *last_call = n;
-    reqwest::blocking::get(uri)
-}
+// pub fn scryfall_call(uri: &str) -> reqwest::Result<reqwest::blocking::Response> {
+//     let mut last_call = LAST_SCRYFALL_CALL.lock().unwrap();
+//     let mut n = Instant::now();
+//     if n - *last_call < SCRYFALL_COOLDOWN {
+//         debug!("waiting before next scryfall call");
+//         std::thread::sleep(SCRYFALL_COOLDOWN - (n - *last_call));
+//     } else {
+//         debug!("last scryfall call was {:?} ago", n - *last_call);
+//         n = Instant::now();
+//     }
+//     *last_call = n;
+//     reqwest::blocking::get(uri)
+// }
 
 pub fn setup_logger() -> Result<(), fern::InitError> {
     fern::Dispatch::new()
@@ -88,14 +92,33 @@ pub struct ScryfallCardNames {
     pub object: String,
     pub uri: String,
     pub total_values: i32,
+    pub date: Option<DateTime<Utc>>,
     #[serde(alias = "data")]
     pub names: Vec<String>,
 }
 
 impl ScryfallCardNames {
-    pub fn from_api_call() -> Option<ScryfallCardNames> {
-        let mut card_names: ScryfallCardNames =
-            serde_json::from_reader(scryfall_call(SCRYFALL_CARD_NAMES).ok()?).ok()?;
+    pub async fn from_api_call(client: &ScryfallClient) -> Option<ScryfallCardNames> {
+        let mut card_names: ScryfallCardNames = client
+            .call(SCRYFALL_CARD_NAMES)
+            .await
+            .ok()?
+            .json::<ScryfallCardNames>()
+            .await
+            .ok()?;
+        card_names.date = Some(Utc::now());
+        for name in card_names.names.iter_mut() {
+            *name = name.to_lowercase();
+        }
+        return Some(card_names);
+    }
+
+    pub fn from_api_call_blocking() -> Option<ScryfallCardNames> {
+        let mut card_names = reqwest::blocking::get(SCRYFALL_CARD_NAMES)
+            .ok()?
+            .json::<ScryfallCardNames>()
+            .ok()?;
+        card_names.date = Some(Utc::now());
         for name in card_names.names.iter_mut() {
             *name = name.to_lowercase();
         }
@@ -118,6 +141,8 @@ pub struct CardPrinting {
     pub border_crop: String,
     pub border_crop_back: Option<String>,
 }
+
+pub type Printings = HashMap<String, Vec<CardPrinting>>;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ScryfallCard {
@@ -170,13 +195,14 @@ pub struct ImageLine {
 }
 
 pub fn insert_scryfall_card(
-    printings: &mut HashMap<String, Vec<CardPrinting>>,
+    printings: &mut Printings,
     card_names: &ScryfallCardNames,
     card: ScryfallCard,
 ) {
-    if card_names.names.contains(&card.name.to_lowercase()) {
+    let lowercase_name = card.name.to_lowercase();
+    if card_names.names.contains(&lowercase_name) {
         printings
-            .entry(card.name.to_lowercase())
+            .entry(lowercase_name)
             .or_insert(Vec::new())
             .push(card.printing);
     } else {
@@ -188,7 +214,7 @@ pub fn insert_scryfall_card(
 }
 
 pub fn insert_scryfall_object(
-    printings: &mut HashMap<String, Vec<CardPrinting>>,
+    printings: &mut Printings,
     card_names: &ScryfallCardNames,
     object: &serde_json::Map<String, Value>,
 ) {
@@ -201,14 +227,14 @@ pub fn insert_scryfall_object(
 pub struct CardData {
     pub card_names: ScryfallCardNames,
     pub lookup: CardNameLookup,
-    pub printings: HashMap<String, Vec<CardPrinting>>,
+    pub printings: Printings,
 }
 
 impl CardData {
-    pub fn from_bulk(bulk: HashMap<String, Vec<CardPrinting>>) -> Option<CardData> {
-        let card_names = ScryfallCardNames::from_api_call()?;
+    pub async fn from_bulk(bulk: Printings, client: &ScryfallClient) -> Option<CardData> {
+        let card_names = ScryfallCardNames::from_api_call(client).await?;
         let lookup = CardNameLookup::from_card_names(&card_names.names);
-        let printings: HashMap<String, Vec<CardPrinting>> = bulk
+        let printings: Printings = bulk
             .into_iter()
             .map(|(key, value)| (key.to_lowercase(), value))
             .collect();
@@ -219,20 +245,20 @@ impl CardData {
         })
     }
 
-    pub fn update_names(&mut self) -> Option<()> {
-        self.card_names = ScryfallCardNames::from_api_call()?;
+    pub async fn update_names(&mut self, client: &ScryfallClient) -> Option<()> {
+        self.card_names = ScryfallCardNames::from_api_call(client).await?;
         self.lookup = CardNameLookup::from_card_names(&self.card_names.names);
         Some(())
     }
 
-    fn ensure_contains(&mut self, lookup: &NameLookupResult) -> () {
+    async fn ensure_contains(&mut self, lookup: &NameLookupResult, client: &ScryfallClient) -> () {
         let entry = self.printings.entry(lookup.name.clone());
         match entry {
             Occupied(_) => {
                 debug!("there is card data for name {}", entry.key());
             }
             Vacant(token) => {
-                let scryfall_objects = query_scryfall_by_name(token.key());
+                let scryfall_objects = query_scryfall_by_name(token.key(), client).await;
                 match scryfall_objects {
                     Some(ref objects) => {
                         for object in objects.iter() {
@@ -247,10 +273,11 @@ impl CardData {
         }
     }
 
-    pub fn get_card(
+    pub async fn get_card(
         &mut self,
         entry: &DecklistEntry,
         default_mode: BacksideMode,
+        client: &ScryfallClient,
     ) -> Option<ImageLine> {
         let namelookup = self.lookup.find(&entry.name)?;
         debug!("namelookup in get_card: {:?}", namelookup);
@@ -259,7 +286,7 @@ impl CardData {
             _ => default_mode,
         };
         debug!("backside in get_card: {:?}", backside);
-        self.ensure_contains(&namelookup);
+        self.ensure_contains(&namelookup, client).await;
         let matchingprintings = self.printings.get(&namelookup.name)?;
         let printing = matchingprintings
             .iter()
@@ -295,15 +322,31 @@ impl CardData {
     }
 }
 
-pub fn image_lines_from_decklist(
-    parsed: Vec<ParsedDecklistLine>,
+pub async fn image_lines_from_decklist(
+    parsed: Vec<ParsedDecklistLine<'_>>,
     card_data: &mut CardData,
     default_backside_mode: BacksideMode,
+    client: &ScryfallClient,
 ) -> Vec<ImageLine> {
-    parsed
-        .iter()
-        .filter_map(|line| card_data.get_card(&line.as_entry()?, default_backside_mode))
-        .collect()
+    let mut image_lines = Vec::<ImageLine>::new();
+    for line in parsed {
+        let entry = &line.as_entry();
+        match entry {
+            Some(entry) => {
+                let image_line = card_data
+                    .get_card(entry, default_backside_mode, client)
+                    .await;
+                match image_line {
+                    Some(image_line) => {
+                        image_lines.push(image_line);
+                    }
+                    None => {}
+                }
+            }
+            None => {}
+        }
+    }
+    image_lines
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -405,7 +448,7 @@ pub fn parse_decklist(decklist: &str) -> Vec<ParsedDecklistLine> {
         .collect()
 }
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Copy, Clone, FromFormField)]
 pub enum BacksideMode {
     Zero,
     One,
@@ -413,34 +456,16 @@ pub enum BacksideMode {
     BackOnly,
 }
 
-impl<'v> FromFormValue<'v> for BacksideMode {
-    type Error = &'v RawStr;
-
-    fn from_form_value(form_value: &'v RawStr) -> Result<BacksideMode, &'v RawStr> {
-        if form_value == "Zero" {
-            Ok(BacksideMode::Zero)
-        } else if form_value == "One" {
-            Ok(BacksideMode::One)
-        } else if form_value == "Matching" {
-            Ok(BacksideMode::Matching)
-        } else if form_value == "BackOnly" {
-            Ok(BacksideMode::BackOnly)
-        } else {
-            Err(form_value)
-        }
-    }
-}
-
 pub fn encode_card_name(name: &str) -> String {
     name.replace(" ", "+").replace("//", "")
 }
 
-pub fn query_image_uri(uri: &str) -> Option<DynamicImage> {
+pub async fn query_image_uri(uri: &str, client: &ScryfallClient) -> Option<DynamicImage> {
     debug!("scryfall uri: {}", uri);
 
-    let request = scryfall_call(uri);
+    let request = client.call(uri).await;
     match request {
-        Ok(reqok) => match reqok.bytes() {
+        Ok(response) => match response.bytes().await {
             Ok(b) => match image::load_from_memory_with_format(&b, image::ImageFormat::Jpeg) {
                 Ok(im) => {
                     return Some(im);
@@ -462,9 +487,10 @@ pub fn query_image_uri(uri: &str) -> Option<DynamicImage> {
     }
 }
 
-pub fn query_scryfall_object(
+pub async fn query_scryfall_object(
     name: &str,
     set: Option<&str>,
+    client: &ScryfallClient,
 ) -> Option<serde_json::Map<String, Value>> {
     let mut uri = format!(
         "https://api.scryfall.com/cards/named?exact={}&format=json",
@@ -473,27 +499,47 @@ pub fn query_scryfall_object(
     if set.is_some() {
         uri += format!("&set={}", set.as_ref().unwrap()).as_str();
     }
-    let request = scryfall_call(&uri);
+    let request = client.call(&uri).await;
     match request {
-        Ok(reqok) => serde_json::from_reader(reqok).ok(),
-        Err(e) => {
-            info!("error in scryfall object request: {}", e);
+        Ok(response) => match response.json::<serde_json::Map<String, Value>>().await {
+            Ok(object) => {
+                return Some(object);
+            }
+            Err(deserialization_error) => {
+                info!(
+                    "error in deserialization of scryfall response: {}",
+                    deserialization_error
+                );
+                return None;
+            }
+        },
+        Err(request_error) => {
+            info!("error in call to scryfall api: {}", request_error);
             return None;
         }
     }
 }
 
-pub fn query_scryfall_by_name(name: &str) -> Option<Vec<serde_json::Map<String, Value>>> {
+pub async fn query_scryfall_by_name(
+    name: &str,
+    client: &ScryfallClient,
+) -> Option<Vec<serde_json::Map<String, Value>>> {
     let uri = format!(
         "https://api.scryfall.com/cards/search?q=name=!{}&unique=prints",
         encode_card_name(name)
     );
-    let request = scryfall_call(&uri);
+    let request = client.call(&uri).await;
     match request {
-        Ok(reqok) => {
-            let answer: ScryfallSearchAnswer = serde_json::from_reader(reqok).ok()?;
-            Some(answer.data)
-        }
+        Ok(response) => match response.json::<ScryfallSearchAnswer>().await {
+            Ok(answer) => Some(answer.data),
+            Err(deserialization_error) => {
+                info!(
+                    "error in deserializing scryfall search request by name: {}",
+                    deserialization_error
+                );
+                return None;
+            }
+        },
         Err(e) => {
             info!("error in scryfall search request by name: {}", e);
             return None;
@@ -544,7 +590,7 @@ impl ScryfallCache {
         }
     }
 
-    pub fn ensure_contains(&mut self, uri: &str) -> Option<()> {
+    pub async fn ensure_contains(&mut self, uri: &str, client: &ScryfallClient) -> Option<()> {
         let entry = self.images.entry(uri.to_string());
         match entry {
             Occupied(_) => {
@@ -552,7 +598,7 @@ impl ScryfallCache {
                 Some(())
             }
             Vacant(token) => {
-                let image_query = query_image_uri(uri);
+                let image_query = query_image_uri(uri, client).await;
                 match image_query {
                     Some(image) => {
                         token.insert(CachedImageResponse {
@@ -570,14 +616,15 @@ impl ScryfallCache {
         }
     }
 
-    pub fn ensure_contains_line(&mut self, line: &ImageLine) -> () {
+    pub async fn ensure_contains_line(&mut self, line: &ImageLine, client: &ScryfallClient) -> () {
         if line.front > 0 {
-            self.ensure_contains(&line.card.printing.border_crop);
+            self.ensure_contains(&line.card.printing.border_crop, client)
+                .await;
         }
         if line.back > 0 {
             match &line.card.printing.border_crop_back {
                 Some(uri) => {
-                    self.ensure_contains(uri);
+                    self.ensure_contains(uri, client).await;
                 }
                 None => {}
             }

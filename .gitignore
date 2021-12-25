@@ -1,4 +1,7 @@
 /target
 .vscode
 Cargo.lock
+card_data.json
+default-cards-*.json
 output.log
+test_*.pdf
