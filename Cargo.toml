@@ -1,5 +1,6 @@
 [workspace]
 
 members = [
-    "magichawk"
+    "magichawk",
+    "printpdf-test"
 ]
