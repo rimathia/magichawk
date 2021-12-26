@@ -1,0 +1,26 @@
+[package]
+name = "magichawk"
+version = "0.3.3"
+authors = ["Mathias Ritzmann <rimathia@users.noreply.github.com>"]
+edition = "2021"
+default-run = "magichawk"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+chrono = {version = ">=0.4", features=["serde"]}
+clap = {version = ">=3.0.0-rc.8", features=["derive"]}
+itertools = ">=0.10.0"
+image = ">=0.23"
+lazy_static = ">=1.4"
+log = ">=0.4"
+ngrammatic = ">=0.3"
+ord_subset = ">=3"
+pdfgen_bindings = { git = "https://github.com/rimathia/PDFGenRustBindings.git" }
+regex = ">=1"
+reqwest = { version = ">=0.11.8", features=["blocking", "json"]}
+rocket = {version = ">=0.5.0-rc.1", features=["json"]}
+serde = {version = ">=1.0", features = ["derive"]}
+serde_json = ">=1.0"
+tempfile = ">=3.1.0"
+tokio = {version = ">=1.15.0", features=["time"]}
