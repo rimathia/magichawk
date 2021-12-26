@@ -51,24 +51,6 @@ pub const IMAGE_WIDTH_CM: f64 = IMAGE_HEIGHT_CM * IMAGE_WIDTH as f64 / IMAGE_HEI
 
 pub const SCRYFALL_COOLDOWN: Duration = Duration::from_millis(100);
 
-// pub fn setup_logger() -> Result<(), fern::InitError> {
-//     fern::Dispatch::new()
-//         .format(|out, message, record| {
-//             out.finish(format_args!(
-//                 "{}[{}][{}] {}",
-//                 chrono::Utc::now().format("[%Y-%m-%d][%H:%M:%S]"),
-//                 record.target(),
-//                 record.level(),
-//                 message
-//             ))
-//         })
-//         .level(log::LevelFilter::Debug)
-//         .chain(std::io::stdout())
-//         .chain(fern::log_file("output.log")?)
-//         .apply()?;
-//     Ok(())
-// }
-
 #[derive(Serialize, Deserialize)]
 pub struct ScryfallCardNames {
     pub object: String,
