@@ -1,0 +1,6 @@
+[default]
+card_data = "test_input/card_data_reduced.json"
+log_level = "debug"
+
+[release]
+card_data = "assets/card_data.json"
