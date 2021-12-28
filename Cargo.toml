@@ -2,5 +2,6 @@
 
 members = [
     "magichawk",
-    "printpdf-test"
+    "printpdf-test",
+    "scryfall"
 ]
