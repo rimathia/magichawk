@@ -686,7 +686,7 @@ where
     };
 
     let pdf = unsafe {
-        pdfgen_bindings::pdf_create(pdfgen_bindings::A4_WIDTH, pdfgen_bindings::A4_HEIGHT, &info)
+        pdfgen_bindings::pdf_create(pdfgen_bindings::a4_width_points(), pdfgen_bindings::a4_height_points(), &info)
     };
 
     loop {
