@@ -24,5 +24,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUSTTARGET: ${{ matrix.target }}
           EXTRA_FILES: ""
+          SRC_DIR: "magichawk"
           ARCHIVE_TYPES: ${{ matrix.archive }}
           MINIFY: "yes"
