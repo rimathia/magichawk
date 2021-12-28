@@ -5,8 +5,9 @@ extern crate serde_json;
 use image::DynamicImage;
 use itertools::Itertools;
 use rocket::http::{ContentType, Status};
-use rocket::{fairing::AdHoc, fs::relative, fs::FileServer, response::content, State};
+use rocket::{fairing::AdHoc, fs::FileServer, response::content, State};
 use std::fs::File;
+use std::path::Path;
 use tokio::sync::Mutex;
 
 use magichawk::ScryfallClient;
@@ -241,7 +242,7 @@ fn rocket() -> _ {
         .attach(AdHoc::on_ignite("create image cache", |rocket| async {
             rocket.manage(Mutex::new(magichawk::ScryfallCache::new()))
         }))
-        .mount("/", FileServer::from(relative!("static/")))
+        .mount("/", FileServer::from(Path::new("static")))
         .mount("/", routes![card_names_full])
         .mount("/", routes![card_names_short])
         .mount("/", routes![card_names_update])
