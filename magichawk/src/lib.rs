@@ -33,7 +33,7 @@ use Option::{None, Some};
 mod scryfall;
 pub use crate::scryfall::ScryfallClient;
 
-pub const SCRYFALL_CARD_NAMES: &'static str = "https://api.scryfall.com/catalog/card-names";
+pub const SCRYFALL_CARD_NAMES: &str = "https://api.scryfall.com/catalog/card-names";
 
 pub const IMAGE_WIDTH: u32 = 480;
 pub const IMAGE_HEIGHT: u32 = 680;
@@ -77,7 +77,7 @@ impl ScryfallCardNames {
         for name in card_names.names.iter_mut() {
             *name = name.to_lowercase();
         }
-        return Some(card_names);
+        Some(card_names)
     }
 
     pub fn from_api_call_blocking() -> Option<ScryfallCardNames> {
@@ -89,7 +89,7 @@ impl ScryfallCardNames {
         for name in card_names.names.iter_mut() {
             *name = name.to_lowercase();
         }
-        return Some(card_names);
+        Some(card_names)
     }
 }
 
@@ -144,14 +144,14 @@ impl ScryfallCard {
                 return None;
             }
         };
-        return Some(ScryfallCard {
+        Some(ScryfallCard {
             name: n,
             printing: CardPrinting {
                 set: s,
                 border_crop: bc,
                 border_crop_back: bcb,
             },
-        });
+        })
     }
 }
 
@@ -170,7 +170,7 @@ pub fn insert_scryfall_card(
     if card_names.names.contains(&lowercase_name) {
         printings
             .entry(lowercase_name)
-            .or_insert(Vec::new())
+            .or_insert_with(Vec::new)
             .push(card.printing);
     } else {
         error!(
@@ -206,9 +206,9 @@ impl CardData {
             .map(|(key, value)| (key.to_lowercase(), value))
             .collect();
         Some(CardData {
-            card_names: card_names,
-            lookup: lookup,
-            printings: printings,
+            card_names,
+            lookup,
+            printings,
         })
     }
 
@@ -218,7 +218,7 @@ impl CardData {
         Some(())
     }
 
-    async fn ensure_contains(&mut self, lookup: &NameLookupResult, client: &ScryfallClient) -> () {
+    async fn ensure_contains(&mut self, lookup: &NameLookupResult, client: &ScryfallClient) {
         let entry = self.printings.entry(lookup.name.clone());
         match entry {
             Occupied(_) => {
@@ -300,14 +300,11 @@ pub async fn image_lines_from_decklist(
         let entry = &line.as_entry();
         match entry {
             Some(entry) => {
-                let image_line = card_data
+                if let Some(image_line) = card_data
                     .get_card(entry, default_backside_mode, client)
-                    .await;
-                match image_line {
-                    Some(image_line) => {
-                        image_lines.push(image_line);
-                    }
-                    None => {}
+                    .await
+                {
+                    image_lines.push(image_line);
                 }
             }
             None => {}
@@ -385,17 +382,13 @@ pub fn parse_line(line: &str) -> Option<DecklistEntry> {
             let set = parse_set(mns.get(3)).map(|s| s.to_string());
             let name_lowercase = name.to_lowercase();
             let non_entries = vec!["deck", "decklist", "sideboard"];
-            if non_entries
-                .iter()
-                .find(|s| ***s == name_lowercase)
-                .is_some()
-            {
+            if non_entries.iter().any(|s| **s == name_lowercase) {
                 None
             } else {
                 Some(DecklistEntry {
-                    multiple: multiple,
-                    name: name,
-                    set: set,
+                    multiple,
+                    name,
+                    set,
                 })
             }
         }
@@ -434,22 +427,20 @@ pub async fn query_image_uri(uri: &str, client: &ScryfallClient) -> Option<Dynam
     match request {
         Ok(response) => match response.bytes().await {
             Ok(b) => match image::load_from_memory_with_format(&b, image::ImageFormat::Jpeg) {
-                Ok(im) => {
-                    return Some(im);
-                }
+                Ok(im) => Some(im),
                 Err(e) => {
                     error!("error converting response to jpeg: {}", e);
-                    return None;
+                    None
                 }
             },
             Err(e) => {
                 info!("error in getting bytes of image: {}", e);
-                return None;
+                None
             }
         },
         Err(e) => {
             info!("error in image request: {}", e);
-            return None;
+            None
         }
     }
 }
@@ -469,20 +460,18 @@ pub async fn query_scryfall_object(
     let request = client.call(&uri).await;
     match request {
         Ok(response) => match response.json::<serde_json::Map<String, Value>>().await {
-            Ok(object) => {
-                return Some(object);
-            }
+            Ok(object) => Some(object),
             Err(deserialization_error) => {
                 info!(
                     "error in deserialization of scryfall response: {}",
                     deserialization_error
                 );
-                return None;
+                None
             }
         },
         Err(request_error) => {
             info!("error in call to scryfall api: {}", request_error);
-            return None;
+            None
         }
     }
 }
@@ -504,12 +493,12 @@ pub async fn query_scryfall_by_name(
                     "error in deserializing scryfall search request by name: {}",
                     deserialization_error
                 );
-                return None;
+                None
             }
         },
         Err(e) => {
             info!("error in scryfall search request by name: {}", e);
-            return None;
+            None
         }
     }
 }
@@ -570,7 +559,7 @@ impl ScryfallCache {
                     Some(image) => {
                         token.insert(CachedImageResponse {
                             t: Utc::now(),
-                            image: image,
+                            image,
                         });
                         Some(())
                     }
@@ -583,7 +572,7 @@ impl ScryfallCache {
         }
     }
 
-    pub async fn ensure_contains_line(&mut self, line: &ImageLine, client: &ScryfallClient) -> () {
+    pub async fn ensure_contains_line(&mut self, line: &ImageLine, client: &ScryfallClient) {
         if line.front > 0 {
             self.ensure_contains(&line.card.printing.border_crop, client)
                 .await;
@@ -616,9 +605,15 @@ impl ScryfallCache {
         let n = Utc::now();
         debug!("{} cached responses before purging", self.images.len());
         self.images
-            .retain(|_, value| n - value.t < max_age.unwrap_or(ScryfallCache::get_max_age()));
+            .retain(|_, value| n - value.t < max_age.unwrap_or_else(ScryfallCache::get_max_age));
         self.last_purge = n;
         debug!("{} cached responses after purging", self.images.len());
+    }
+}
+
+impl Default for ScryfallCache {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -634,7 +629,7 @@ where
 
     loop {
         match it.next() {
-            None => return composed.map(|im| DynamicImage::ImageRgb8(im)),
+            None => return composed.map(DynamicImage::ImageRgb8),
             Some(im) => {
                 let without_alpha: RgbImage = im.to_rgb8();
                 overlay(
@@ -653,7 +648,7 @@ where
                     pos_ver += 1;
                 }
                 if pos_ver == 3 {
-                    return composed.map(|im| DynamicImage::ImageRgb8(im));
+                    return composed.map(DynamicImage::ImageRgb8);
                 }
             }
         }
@@ -667,12 +662,14 @@ where
     let (doc, page1, layer1) =
         PdfDocument::new("PDF_Document_title", A4_WIDTH, A4_HEIGHT, "Layer 1");
 
-    let mut transform = ImageTransform::default();
-    transform.dpi = Some(DPI);
-    transform.translate_x = Some((A4_WIDTH - Mm(3.0 * IMAGE_WIDTH_CM * 10.0)) / 2.0);
-    transform.translate_y = Some((A4_HEIGHT - Mm(3.0 * IMAGE_HEIGHT_CM * 10.0)) / 2.0);
-    transform.scale_x = Some(IMAGE_WIDTH_CM / (IMAGE_WIDTH as f64) * DPCM);
-    transform.scale_y = Some(IMAGE_HEIGHT_CM / (IMAGE_HEIGHT as f64) * DPCM);
+    let transform = ImageTransform {
+        dpi: Some(DPI),
+        translate_x: Some((A4_WIDTH - Mm(3.0 * IMAGE_WIDTH_CM * 10.0)) / 2.0),
+        translate_y: Some((A4_HEIGHT - Mm(3.0 * IMAGE_HEIGHT_CM * 10.0)) / 2.0),
+        scale_x: Some(IMAGE_WIDTH_CM / (IMAGE_WIDTH as f64) * DPCM),
+        scale_y: Some(IMAGE_HEIGHT_CM / (IMAGE_HEIGHT as f64) * DPCM),
+        rotate: None,
+    };
 
     for (i, im) in it.enumerate() {
         if i > 0 {
@@ -754,26 +751,26 @@ impl CardNameLookup {
         }
     }
 
-    pub fn from_card_names(names: &Vec<String>) -> CardNameLookup {
+    pub fn from_card_names(names: &[String]) -> CardNameLookup {
         let mut lookup = CardNameLookup::new();
         for name in names.iter() {
             lookup.insert(name);
         }
-        return lookup;
+        lookup
     }
 
     fn insert(&mut self, name_uppercase: &str) {
         let name = name_uppercase.to_lowercase();
         self.corpora
             .entry(NameMatchMode::Full)
-            .or_insert(CardCorpus::new())
+            .or_insert_with(CardCorpus::new)
             .insert(&name, &name);
 
         if name.contains("//") {
             for (i, partial_name) in name.split("//").map(|s| s.trim()).enumerate() {
                 self.corpora
                     .entry(NameMatchMode::Part(i))
-                    .or_insert(CardCorpus::new())
+                    .or_insert_with(CardCorpus::new)
                     .insert(partial_name, &name);
             }
         }

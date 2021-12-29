@@ -19,12 +19,18 @@ impl ScryfallClient {
     }
 
     pub async fn call(&self, uri: &str) -> Result<reqwest::Response, reqwest::Error> {
-        let next_call = (|| {
+        let next_call = {
             let mut l = *self.last_call.lock().unwrap();
             l += SCRYFALL_COOLDOWN;
             l
-        })();
+        };
         tokio::time::sleep_until(next_call).await;
         self.client.get(uri).send().await
+    }
+}
+
+impl Default for ScryfallClient {
+    fn default() -> Self {
+        Self::new()
     }
 }
