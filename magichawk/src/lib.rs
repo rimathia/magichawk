@@ -2,7 +2,7 @@ extern crate chrono;
 #[macro_use]
 extern crate lazy_static;
 extern crate log;
-extern crate pdfgen_bindings;
+extern crate printpdf;
 extern crate regex;
 extern crate reqwest;
 extern crate rocket;
@@ -11,14 +11,11 @@ extern crate serde_json;
 extern crate tokio;
 
 use chrono::{DateTime, Utc};
-use image::{
-    imageops::overlay,
-    jpeg::{JpegEncoder, PixelDensity, PixelDensityUnit},
-    DynamicImage, GenericImage, GenericImageView, ImageResult, Rgba, RgbaImage,
-};
 use log::{debug, error, info};
 use ngrammatic::*;
 use ord_subset::OrdVar;
+use printpdf::image_crate::{imageops::overlay, DynamicImage, Rgb, RgbImage};
+use printpdf::{Image, ImageTransform, Mm, PdfDocument};
 use regex::Match;
 use regex::Regex;
 use rocket::form::FromFormField;
@@ -29,8 +26,6 @@ use std::collections::{
     HashMap,
 };
 use std::fmt;
-use std::io::{Cursor, Read};
-use std::os::unix::ffi::OsStrExt;
 use std::string::String;
 use std::time::Duration;
 use Option::{None, Some};
@@ -48,6 +43,14 @@ pub const PAGE_HEIGHT: u32 = 3 * IMAGE_HEIGHT;
 
 pub const IMAGE_HEIGHT_CM: f64 = 8.7;
 pub const IMAGE_WIDTH_CM: f64 = IMAGE_HEIGHT_CM * IMAGE_WIDTH as f64 / IMAGE_HEIGHT as f64;
+
+pub const INCH_DIV_CM: f64 = 2.54;
+
+pub const DPI: f64 = 300.0;
+pub const DPCM: f64 = DPI / INCH_DIV_CM;
+
+const A4_WIDTH: Mm = Mm(210.0);
+const A4_HEIGHT: Mm = Mm(297.0);
 
 pub const SCRYFALL_COOLDOWN: Duration = Duration::from_millis(100);
 
@@ -619,27 +622,28 @@ impl ScryfallCache {
     }
 }
 
-pub fn images_to_page<'a, I>(mut it: I) -> Option<RgbaImage>
+pub fn images_to_page<'a, I>(mut it: I) -> Option<DynamicImage>
 where
     I: Iterator<Item = &'a DynamicImage>,
 {
     let mut pos_hor = 0;
     let mut pos_ver = 0;
 
-    let mut composed: Option<RgbaImage> = None;
-    let white_pixel = Rgba::<u8>([255, 255, 255, 255]);
+    let mut composed: Option<RgbImage> = None;
+    let white_pixel = Rgb::<u8>([255, 255, 255]);
 
     loop {
         match it.next() {
-            None => return composed,
+            None => return composed.map(|im| DynamicImage::ImageRgb8(im)),
             Some(im) => {
+                let without_alpha: RgbImage = im.to_rgb8();
                 overlay(
-                    composed.get_or_insert(RgbaImage::from_pixel(
+                    composed.get_or_insert(RgbImage::from_pixel(
                         PAGE_WIDTH,
                         PAGE_HEIGHT,
                         white_pixel,
                     )),
-                    im,
+                    &without_alpha,
                     pos_hor * IMAGE_WIDTH,
                     pos_ver * IMAGE_HEIGHT,
                 );
@@ -649,100 +653,38 @@ where
                     pos_ver += 1;
                 }
                 if pos_ver == 3 {
-                    return composed;
+                    return composed.map(|im| DynamicImage::ImageRgb8(im));
                 }
             }
         }
     }
 }
 
-pub fn encode_jpeg<I: GenericImageView>(im: &I) -> ImageResult<Vec<u8>> {
-    let mut outputbuffer: Vec<u8> = vec![];
-    let mut outputcursor = Cursor::new(&mut outputbuffer);
-    let mut encoder = JpegEncoder::new_with_quality(&mut outputcursor, 100);
-    let image_px_per_cm: u16 = ((IMAGE_HEIGHT as f64) / IMAGE_HEIGHT_CM).round() as u16;
-
-    let image_dpi: PixelDensity = PixelDensity {
-        density: (image_px_per_cm, image_px_per_cm),
-        unit: PixelDensityUnit::Centimeters,
-    };
-    encoder.set_pixel_density(image_dpi);
-    encoder.encode_image(im)?;
-    Ok(outputbuffer)
-}
-
-pub fn pages_to_pdf<I>(mut it: I) -> Option<Vec<u8>>
+pub fn pages_to_pdf<I>(it: I) -> Option<Vec<u8>>
 where
-    I: Iterator,
-    I::Item: GenericImage,
+    I: Iterator<Item = DynamicImage>,
 {
-    let info = pdfgen_bindings::PDFInfo {
-        creator: [0; 64],
-        producer: [0; 64],
-        title: [0; 64],
-        author: [0; 64],
-        subject: [0; 64],
-        date: [0; 64],
-    };
+    let (doc, page1, layer1) =
+        PdfDocument::new("PDF_Document_title", A4_WIDTH, A4_HEIGHT, "Layer 1");
 
-    let pdf = unsafe {
-        pdfgen_bindings::pdf_create(pdfgen_bindings::a4_width_points(), pdfgen_bindings::a4_height_points(), &info)
-    };
+    let mut transform = ImageTransform::default();
+    transform.dpi = Some(DPI);
+    transform.translate_x = Some((A4_WIDTH - Mm(3.0 * IMAGE_WIDTH_CM * 10.0)) / 2.0);
+    transform.translate_y = Some((A4_HEIGHT - Mm(3.0 * IMAGE_HEIGHT_CM * 10.0)) / 2.0);
+    transform.scale_x = Some(IMAGE_WIDTH_CM / (IMAGE_WIDTH as f64) * DPCM);
+    transform.scale_y = Some(IMAGE_HEIGHT_CM / (IMAGE_HEIGHT as f64) * DPCM);
 
-    loop {
-        match it.next() {
-            Some(grid) => match encode_jpeg(&grid) {
-                Ok(outputbuffer) => unsafe {
-                    let page = pdfgen_bindings::pdf_append_page(pdf);
-                    pdfgen_bindings::pdf_add_jpeg_data(
-                        pdf,
-                        page,
-                        pdfgen_bindings::mm_to_point(13.0),
-                        pdfgen_bindings::mm_to_point(18.0),
-                        pdfgen_bindings::mm_to_point((3.0f64 * IMAGE_WIDTH_CM * 10.0f64) as f32),
-                        pdfgen_bindings::mm_to_point((3.0f64 * IMAGE_HEIGHT_CM * 10.0) as f32),
-                        outputbuffer.as_slice().as_ptr(),
-                        outputbuffer.len(),
-                    );
-                },
-                Err(e) => {
-                    error!("error in jpeg encoding: {}", e);
-                    return None;
-                }
-            },
-            None => {
-                let tmpfilename = match tempfile::NamedTempFile::new() {
-                    Ok(t) => t.into_temp_path(),
-                    Err(e) => {
-                        error!("error in creation of temporary file: {}", e);
-                        return None;
-                    }
-                };
-                debug!("created temporary file {:?}", tmpfilename);
-                let tmpfilename_c = match std::ffi::CString::new(tmpfilename.as_os_str().as_bytes())
-                {
-                    Ok(x) => x,
-                    Err(e) => {
-                        error!("error in creating c string: {}", e);
-                        return None;
-                    }
-                };
-
-                unsafe {
-                    pdfgen_bindings::pdf_save(pdf, tmpfilename_c.as_ptr());
-                    pdfgen_bindings::pdf_destroy(pdf);
-                }
-
-                let mut pdfbytes = Vec::<u8>::new();
-                std::fs::File::open(tmpfilename)
-                    .unwrap()
-                    .read_to_end(&mut pdfbytes)
-                    .unwrap();
-
-                return Some(pdfbytes);
-            }
+    for (i, im) in it.enumerate() {
+        if i > 0 {
+            let (added_page, added_layer) = doc.add_page(A4_WIDTH, A4_HEIGHT, "Layer 1");
+            let current_layer = doc.get_page(added_page).get_layer(added_layer);
+            Image::from_dynamic_image(&im).add_to_layer(current_layer.clone(), transform);
+        } else {
+            let current_layer = doc.get_page(page1).get_layer(layer1);
+            Image::from_dynamic_image(&im).add_to_layer(current_layer.clone(), transform);
         }
     }
+    doc.save_to_bytes().ok()
 }
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone, Copy, PartialOrd, Ord)]
