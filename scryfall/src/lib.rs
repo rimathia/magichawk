@@ -448,6 +448,15 @@ pub enum FrameEffect {
 
     #[serde(rename = "booster")]
     Booster,
+
+    #[serde(rename = "showcase")]
+    Showcase,
+
+    #[serde(rename = "fullart")]
+    Fullart,
+
+    #[serde(rename = "etched")]
+    Etched,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -497,7 +506,7 @@ pub struct Card {
     pub tcgplayer_etched_id: Option<u32>,
     pub cardmarket_id: Option<u32>,
     pub object: Object,
-    pub oracle_id: Uuid,
+    pub oracle_id: Option<Uuid>,
     pub prints_search_uri: String,
     pub rulings_uri: String,
     pub scryfall_uri: String,
@@ -505,7 +514,7 @@ pub struct Card {
 
     pub all_parts: Option<Vec<RelatedCard>>,
     pub card_faces: Option<Vec<CardFace>>,
-    pub cmc: f64,
+    pub cmc: Option<f64>,
     pub color_identity: Vec<Color>,
     pub color_indicator: Option<Vec<Color>>,
     pub colors: Option<Vec<Color>>,
@@ -524,7 +533,7 @@ pub struct Card {
     pub produced_mana: Option<Vec<ProducedMana>>,
     pub reserved: bool,
     pub toughness: Option<String>,
-    pub type_line: String,
+    pub type_line: Option<String>,
 
     pub artist: Option<String>,
     pub booster: bool,

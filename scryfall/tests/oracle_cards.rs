@@ -11,5 +11,5 @@ fn test_oracle_cards() {
     .expect("couldn't open input file with oracle cards");
 
     let cards: Vec<Card> = serde_json::from_reader(f).unwrap();
-    println!("there are {} cards", cards.len());
+    println!("there are {} cards in the oracle cards file", cards.len());
 }
