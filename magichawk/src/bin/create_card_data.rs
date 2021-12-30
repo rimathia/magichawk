@@ -1,6 +1,6 @@
 use clap::Parser;
 use magichawk::{CardPrinting, ScryfallCardNames};
-use serde_json::{from_reader, Value};
+use serde_json::from_reader;
 use std::fs::File;
 
 /// Process a bulk "Default Cards" file from the Scryfall API into a card data file for magichawk,
@@ -27,7 +27,7 @@ fn main() {
     let f = File::open(&opts.input).unwrap();
     let outputfile = File::create(&opts.output).unwrap();
 
-    let default_cards: Vec<serde_json::Map<String, Value>> = from_reader(f).unwrap();
+    let default_cards: Vec<serde_json::Map<String, serde_json::Value>> = from_reader(f).unwrap();
     println!(
         "there are {} entries in {}",
         default_cards.len(),

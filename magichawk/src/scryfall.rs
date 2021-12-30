@@ -170,3 +170,37 @@ pub async fn query_scryfall_by_name(
         }
     }
 }
+
+// pub async fn query_scryfall_object(
+//     name: &str,
+//     set: Option<&str>,
+//     client: &ScryfallClient,
+// ) -> Option<serde_json::Map<String, serde_json::Value>> {
+//     let mut uri = format!(
+//         "https://api.scryfall.com/cards/named?exact={}&format=json",
+//         encode_card_name(name)
+//     );
+//     if set.is_some() {
+//         uri += format!("&set={}", set.as_ref().unwrap()).as_str();
+//     }
+//     let request = client.call(&uri).await;
+//     match request {
+//         Ok(response) => match response
+//             .json::<serde_json::Map<String, serde_json::Value>>()
+//             .await
+//         {
+//             Ok(object) => Some(object),
+//             Err(deserialization_error) => {
+//                 info!(
+//                     "error in deserialization of scryfall response: {}",
+//                     deserialization_error
+//                 );
+//                 None
+//             }
+//         },
+//         Err(request_error) => {
+//             info!("error in call to scryfall api: {}", request_error);
+//             None
+//         }
+//     }
+// }

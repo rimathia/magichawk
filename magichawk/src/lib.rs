@@ -16,7 +16,6 @@ use printpdf::image_crate::{imageops::overlay, DynamicImage, Rgb, RgbImage};
 use regex::Match;
 use regex::Regex;
 use rocket::form::FromFormField;
-use serde_json::Value;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::fmt;
 use std::string::String;
@@ -29,9 +28,8 @@ mod pdf;
 pub use crate::pdf::page_images_to_pdf;
 
 mod scryfall;
-use scryfall::{
-    insert_scryfall_object, query_scryfall_by_name, Printings, ScryfallCard, ScryfallCardNames,
-};
+pub use scryfall::{insert_scryfall_object, CardPrinting, Printings, ScryfallCardNames};
+use scryfall::{query_scryfall_by_name, ScryfallCard};
 
 mod scryfall_client;
 pub use crate::scryfall_client::ScryfallClient;
@@ -276,10 +274,6 @@ pub enum BacksideMode {
     BackOnly,
 }
 
-pub fn encode_card_name(name: &str) -> String {
-    name.replace(" ", "+").replace("//", "")
-}
-
 pub async fn query_image_uri(uri: &str, client: &ScryfallClient) -> Option<DynamicImage> {
     debug!("scryfall uri: {}", uri);
 
@@ -300,37 +294,6 @@ pub async fn query_image_uri(uri: &str, client: &ScryfallClient) -> Option<Dynam
         },
         Err(e) => {
             info!("error in image request: {}", e);
-            None
-        }
-    }
-}
-
-pub async fn query_scryfall_object(
-    name: &str,
-    set: Option<&str>,
-    client: &ScryfallClient,
-) -> Option<serde_json::Map<String, Value>> {
-    let mut uri = format!(
-        "https://api.scryfall.com/cards/named?exact={}&format=json",
-        encode_card_name(name)
-    );
-    if set.is_some() {
-        uri += format!("&set={}", set.as_ref().unwrap()).as_str();
-    }
-    let request = client.call(&uri).await;
-    match request {
-        Ok(response) => match response.json::<serde_json::Map<String, Value>>().await {
-            Ok(object) => Some(object),
-            Err(deserialization_error) => {
-                info!(
-                    "error in deserialization of scryfall response: {}",
-                    deserialization_error
-                );
-                None
-            }
-        },
-        Err(request_error) => {
-            info!("error in call to scryfall api: {}", request_error);
             None
         }
     }
