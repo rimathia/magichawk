@@ -111,3 +111,45 @@ impl CardNameLookup {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn name_search() {
+        let card_names: Vec<String> = vec![
+            "Okaun, Eye of Chaos".to_string(),
+            "Cut // Ribbons".to_string(),
+        ];
+        let lookup = CardNameLookup::from_card_names(&card_names);
+        assert_eq!(
+            lookup.find("okaun"),
+            Some(NameLookupResult {
+                name: "okaun, eye of chaos".to_string(),
+                hit: NameMatchMode::Full
+            })
+        );
+        assert_eq!(
+            lookup.find("cut // ribbon"),
+            Some(NameLookupResult {
+                name: "cut // ribbons".to_string(),
+                hit: NameMatchMode::Full
+            })
+        );
+        assert_eq!(
+            lookup.find("cut"),
+            Some(NameLookupResult {
+                name: "cut // ribbons".to_string(),
+                hit: NameMatchMode::Part(0)
+            })
+        );
+        assert_eq!(
+            lookup.find("ribbon"),
+            Some(NameLookupResult {
+                name: "cut // ribbons".to_string(),
+                hit: NameMatchMode::Part(1)
+            })
+        );
+    }
+}
