@@ -57,7 +57,7 @@ async fn create_pdf(
         return (Status::BadRequest, (ContentType::Plain, message));
     }
 
-    let pdf = magichawk::pages_to_pdf(
+    let pdf = magichawk::page_images_to_pdf(
         expanded
             .into_iter()
             .batching(|it| magichawk::images_to_page(it)),

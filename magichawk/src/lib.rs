@@ -12,28 +12,29 @@ extern crate tokio;
 
 use chrono::{DateTime, Utc};
 use log::{debug, error, info};
-use ngrammatic::*;
-use ord_subset::OrdVar;
 use printpdf::image_crate::{imageops::overlay, DynamicImage, Rgb, RgbImage};
-use printpdf::{Image, ImageTransform, Mm, PdfDocument};
 use regex::Match;
 use regex::Regex;
 use rocket::form::FromFormField;
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{
-    hash_map::Entry::{Occupied, Vacant},
-    HashMap,
-};
+use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::fmt;
 use std::string::String;
-use std::time::Duration;
 use Option::{None, Some};
 
-mod scryfall;
-pub use crate::scryfall::ScryfallClient;
+mod lookup;
+use crate::lookup::{CardNameLookup, NameLookupResult, NameMatchMode};
 
-pub const SCRYFALL_CARD_NAMES: &str = "https://api.scryfall.com/catalog/card-names";
+mod pdf;
+pub use crate::pdf::page_images_to_pdf;
+
+mod scryfall;
+use scryfall::{
+    insert_scryfall_object, query_scryfall_by_name, Printings, ScryfallCard, ScryfallCardNames,
+};
+
+mod scryfall_client;
+pub use crate::scryfall_client::ScryfallClient;
 
 pub const IMAGE_WIDTH: u32 = 480;
 pub const IMAGE_HEIGHT: u32 = 680;
@@ -44,151 +45,10 @@ pub const PAGE_HEIGHT: u32 = 3 * IMAGE_HEIGHT;
 pub const IMAGE_HEIGHT_CM: f64 = 8.7;
 pub const IMAGE_WIDTH_CM: f64 = IMAGE_HEIGHT_CM * IMAGE_WIDTH as f64 / IMAGE_HEIGHT as f64;
 
-pub const INCH_DIV_CM: f64 = 2.54;
-
-pub const DPI: f64 = 300.0;
-pub const DPCM: f64 = DPI / INCH_DIV_CM;
-
-const A4_WIDTH: Mm = Mm(210.0);
-const A4_HEIGHT: Mm = Mm(297.0);
-
-pub const SCRYFALL_COOLDOWN: Duration = Duration::from_millis(100);
-
-#[derive(Serialize, Deserialize)]
-pub struct ScryfallCardNames {
-    pub object: String,
-    pub uri: String,
-    pub total_values: i32,
-    pub date: Option<DateTime<Utc>>,
-    #[serde(alias = "data")]
-    pub names: Vec<String>,
-}
-
-impl ScryfallCardNames {
-    pub async fn from_api_call(client: &ScryfallClient) -> Option<ScryfallCardNames> {
-        let mut card_names: ScryfallCardNames = client
-            .call(SCRYFALL_CARD_NAMES)
-            .await
-            .ok()?
-            .json::<ScryfallCardNames>()
-            .await
-            .ok()?;
-        card_names.date = Some(Utc::now());
-        for name in card_names.names.iter_mut() {
-            *name = name.to_lowercase();
-        }
-        Some(card_names)
-    }
-
-    pub fn from_api_call_blocking() -> Option<ScryfallCardNames> {
-        let mut card_names = reqwest::blocking::get(SCRYFALL_CARD_NAMES)
-            .ok()?
-            .json::<ScryfallCardNames>()
-            .ok()?;
-        card_names.date = Some(Utc::now());
-        for name in card_names.names.iter_mut() {
-            *name = name.to_lowercase();
-        }
-        Some(card_names)
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct ScryfallSearchAnswer {
-    pub object: String,
-    pub total_cards: i32,
-    pub has_more: bool,
-    pub next_page: Option<String>,
-    pub data: Vec<serde_json::Map<String, Value>>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct CardPrinting {
-    pub set: String,
-    pub border_crop: String,
-    pub border_crop_back: Option<String>,
-}
-
-pub type Printings = HashMap<String, Vec<CardPrinting>>;
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct ScryfallCard {
-    pub name: String,
-    pub printing: CardPrinting,
-}
-
-impl ScryfallCard {
-    pub fn from_scryfall_object(d: &serde_json::Map<String, Value>) -> Option<ScryfallCard> {
-        let n: String = d["name"].as_str()?.to_string().to_lowercase();
-        let s = d["set"].as_str()?.to_string().to_lowercase();
-        let (bc, bcb) = {
-            if d.contains_key("image_uris") {
-                (d["image_uris"]["border_crop"].as_str()?.to_string(), None)
-            } else if d.contains_key("card_faces") {
-                let card_faces = d["card_faces"].as_array()?;
-                if card_faces.len() != 2 {
-                    return None;
-                } else {
-                    (
-                        card_faces[0]["image_uris"]["border_crop"]
-                            .as_str()?
-                            .to_string(),
-                        Some(
-                            card_faces[1]["image_uris"]["border_crop"]
-                                .as_str()?
-                                .to_string(),
-                        ),
-                    )
-                }
-            } else {
-                return None;
-            }
-        };
-        Some(ScryfallCard {
-            name: n,
-            printing: CardPrinting {
-                set: s,
-                border_crop: bc,
-                border_crop_back: bcb,
-            },
-        })
-    }
-}
-
 pub struct ImageLine {
     pub card: ScryfallCard,
     pub front: i32,
     pub back: i32,
-}
-
-pub fn insert_scryfall_card(
-    printings: &mut Printings,
-    card_names: &ScryfallCardNames,
-    card: ScryfallCard,
-) {
-    let lowercase_name = card.name.to_lowercase();
-    if card_names.names.contains(&lowercase_name) {
-        printings
-            .entry(lowercase_name)
-            .or_insert_with(Vec::new)
-            .push(card.printing);
-    } else {
-        error!(
-            "couldn't insert scryfall card because name was unknown: {:?}",
-            card
-        )
-    }
-}
-
-pub fn insert_scryfall_object(
-    printings: &mut Printings,
-    card_names: &ScryfallCardNames,
-    object: &serde_json::Map<String, Value>,
-) {
-    match ScryfallCard::from_scryfall_object(object) {
-        Some(card) => insert_scryfall_card(printings, card_names, card),
-        None => error!("couldn't convert scryfall object {:?}", object),
-    }
 }
 
 pub struct CardData {
@@ -476,33 +336,6 @@ pub async fn query_scryfall_object(
     }
 }
 
-pub async fn query_scryfall_by_name(
-    name: &str,
-    client: &ScryfallClient,
-) -> Option<Vec<serde_json::Map<String, Value>>> {
-    let uri = format!(
-        "https://api.scryfall.com/cards/search?q=name=!{}&unique=prints",
-        encode_card_name(name)
-    );
-    let request = client.call(&uri).await;
-    match request {
-        Ok(response) => match response.json::<ScryfallSearchAnswer>().await {
-            Ok(answer) => Some(answer.data),
-            Err(deserialization_error) => {
-                info!(
-                    "error in deserializing scryfall search request by name: {}",
-                    deserialization_error
-                );
-                None
-            }
-        },
-        Err(e) => {
-            info!("error in scryfall search request by name: {}", e);
-            None
-        }
-    }
-}
-
 pub struct CachedImageResponse {
     t: DateTime<Utc>,
     image: DynamicImage,
@@ -654,143 +487,6 @@ where
         }
     }
 }
-
-pub fn pages_to_pdf<I>(it: I) -> Option<Vec<u8>>
-where
-    I: Iterator<Item = DynamicImage>,
-{
-    let (doc, page1, layer1) =
-        PdfDocument::new("PDF_Document_title", A4_WIDTH, A4_HEIGHT, "Layer 1");
-
-    let transform = ImageTransform {
-        dpi: Some(DPI),
-        translate_x: Some((A4_WIDTH - Mm(3.0 * IMAGE_WIDTH_CM * 10.0)) / 2.0),
-        translate_y: Some((A4_HEIGHT - Mm(3.0 * IMAGE_HEIGHT_CM * 10.0)) / 2.0),
-        scale_x: Some(IMAGE_WIDTH_CM / (IMAGE_WIDTH as f64) * DPCM),
-        scale_y: Some(IMAGE_HEIGHT_CM / (IMAGE_HEIGHT as f64) * DPCM),
-        rotate: None,
-    };
-
-    for (i, im) in it.enumerate() {
-        if i > 0 {
-            let (added_page, added_layer) = doc.add_page(A4_WIDTH, A4_HEIGHT, "Layer 1");
-            let current_layer = doc.get_page(added_page).get_layer(added_layer);
-            Image::from_dynamic_image(&im).add_to_layer(current_layer.clone(), transform);
-        } else {
-            let current_layer = doc.get_page(page1).get_layer(layer1);
-            Image::from_dynamic_image(&im).add_to_layer(current_layer.clone(), transform);
-        }
-    }
-    doc.save_to_bytes().ok()
-}
-
-#[derive(Debug, Eq, PartialEq, Hash, Clone, Copy, PartialOrd, Ord)]
-pub enum NameMatchMode {
-    Full,
-    Part(usize),
-}
-
-#[derive(Debug, Clone, PartialOrd, Ord, Eq, PartialEq)]
-pub struct CorpusLookupResult {
-    similarity: OrdVar<f32>,
-    name: String,
-}
-
-#[derive(Debug)]
-pub struct CardCorpus {
-    corpus: Corpus,
-    to_full: HashMap<String, String>,
-}
-
-impl CardCorpus {
-    const THRESHOLD: f32 = 0.25;
-
-    fn new() -> CardCorpus {
-        CardCorpus {
-            corpus: CorpusBuilder::new().finish(),
-            to_full: HashMap::new(),
-        }
-    }
-
-    pub fn insert(&mut self, partial_name: &str, full_name: &str) {
-        self.corpus.add_text(partial_name);
-        if partial_name != full_name {
-            self.to_full
-                .insert(partial_name.to_string(), full_name.to_string());
-        }
-    }
-
-    pub fn find(&self, name: &str) -> Option<CorpusLookupResult> {
-        let n = self
-            .corpus
-            .search(name, CardCorpus::THRESHOLD)
-            .into_iter()
-            .next()?;
-        Some(CorpusLookupResult {
-            name: self.to_full.get(n.text.as_str()).unwrap_or(&n.text).clone(),
-            similarity: OrdVar::new_checked(n.similarity)?,
-        })
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct NameLookupResult {
-    name: String,
-    hit: NameMatchMode,
-}
-
-#[derive(Debug)]
-pub struct CardNameLookup {
-    corpora: HashMap<NameMatchMode, CardCorpus>,
-}
-
-impl CardNameLookup {
-    fn new() -> CardNameLookup {
-        CardNameLookup {
-            corpora: HashMap::new(),
-        }
-    }
-
-    pub fn from_card_names(names: &[String]) -> CardNameLookup {
-        let mut lookup = CardNameLookup::new();
-        for name in names.iter() {
-            lookup.insert(name);
-        }
-        lookup
-    }
-
-    fn insert(&mut self, name_uppercase: &str) {
-        let name = name_uppercase.to_lowercase();
-        self.corpora
-            .entry(NameMatchMode::Full)
-            .or_insert_with(CardCorpus::new)
-            .insert(&name, &name);
-
-        if name.contains("//") {
-            for (i, partial_name) in name.split("//").map(|s| s.trim()).enumerate() {
-                self.corpora
-                    .entry(NameMatchMode::Part(i))
-                    .or_insert_with(CardCorpus::new)
-                    .insert(partial_name, &name);
-            }
-        }
-    }
-
-    pub fn find(&self, name_uppercase: &str) -> Option<NameLookupResult> {
-        let name = name_uppercase.to_lowercase();
-        let best_match = self
-            .corpora
-            .iter()
-            .filter_map(|(mode, c)| Some((c.find(&name)?, *mode)))
-            .max_by(|(leftres, _), (rightres, _)| leftres.similarity.cmp(&rightres.similarity))?;
-        debug!("similarity of best match: {:?}", best_match.0.similarity);
-        Some(NameLookupResult {
-            name: best_match.0.name.clone(),
-            hit: best_match.1,
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
