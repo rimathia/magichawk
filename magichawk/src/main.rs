@@ -32,36 +32,32 @@ async fn create_pdf(
     let mut expanded: Vec<&DynamicImage> = Vec::new();
     for line in cards.iter() {
         if line.front > 0 {
-            match cache.get(&line.card.printing.border_crop) {
-                Some(image) => {
-                    for _i in 0..line.front {
-                        expanded.push(image);
+            if let Some(image) = cache.get(&line.card.printing.border_crop) {
+                for _i in 0..line.front {
+                    expanded.push(image);
+                }
+            }
+        }
+        if line.back > 0 {
+            match &line.card.printing.border_crop_back {
+                Some(uri) => {
+                    if let Some(image) = cache.get(uri) {
+                        for _i in 0..line.back {
+                            expanded.push(image);
+                        }
                     }
                 }
                 None => {}
             };
         }
-        if line.back > 0 {
-            match &line.card.printing.border_crop_back {
-                Some(uri) => match cache.get(uri) {
-                    Some(image) => {
-                        for _i in 0..line.back {
-                            expanded.push(image);
-                        }
-                    }
-                    None => {}
-                },
-                None => {}
-            };
-        }
     }
 
-    if expanded.len() == 0 {
+    if expanded.is_empty() {
         let message: Vec<u8> = "no card names have been recognized".as_bytes().to_vec();
         return (Status::BadRequest, (ContentType::Plain, message));
     }
 
-    let pdf = magichawk::pages_to_pdf(
+    let pdf = magichawk::page_images_to_pdf(
         expanded
             .into_iter()
             .batching(|it| magichawk::images_to_page(it)),
@@ -70,11 +66,11 @@ async fn create_pdf(
     match pdf {
         Some(bytes) => {
             info!("sending out pdf with size {}", bytes.len());
-            return (Status::Ok, (ContentType::PDF, bytes));
+            (Status::Ok, (ContentType::PDF, bytes))
         }
         None => {
             let message: Vec<u8> = "internal server error (sorry)".as_bytes().to_vec();
-            return (Status::InternalServerError, (ContentType::Plain, message));
+            (Status::InternalServerError, (ContentType::Plain, message))
         }
     }
 }
@@ -92,7 +88,7 @@ async fn purge_cache(
     state
         .lock()
         .await
-        .purge(age_seconds.map(|s| chrono::Duration::seconds(s)));
+        .purge(age_seconds.map(chrono::Duration::seconds));
     list_cache(state).await
 }
 
@@ -166,6 +162,42 @@ struct AppConfig {
     card_data: String,
 }
 
+async fn trigger_local_call(name: String, url: String, interval: std::time::Duration) {
+    let client = reqwest::Client::new();
+    let mut wakeup_time = tokio::time::Instant::now() + interval;
+    loop {
+        tokio::time::sleep_until(wakeup_time).await;
+        wakeup_time += interval;
+        info!("trigger update of card names");
+        match client.get(&url).send().await {
+            Ok(_response) => {
+                info!("response to local call {} ok", name);
+            }
+            Err(e) => {
+                error!("error when trying local call {}: {}", name, e);
+            }
+        }
+    }
+}
+
+async fn trigger_card_name_update() {
+    trigger_local_call(
+        "card name update".to_string(),
+        "http://localhost:8000/card_names/update".to_string(),
+        std::time::Duration::from_secs(10 * 60),
+    )
+    .await
+}
+
+async fn trigger_cache_purge() {
+    trigger_local_call(
+        "purge cache".to_string(),
+        "http://localhost:8000/cache/purge".to_string(),
+        std::time::Duration::from_secs(24 * 60 * 60),
+    )
+    .await
+}
+
 #[launch]
 fn rocket() -> _ {
     rocket::build()
@@ -174,28 +206,7 @@ fn rocket() -> _ {
             "create trigger for update of card names",
             |_| {
                 Box::pin(async move {
-                    tokio::task::spawn((|| async {
-                        let client = reqwest::Client::new();
-                        let interval = std::time::Duration::from_secs(10 * 60);
-                        let mut wakeup_time = tokio::time::Instant::now() + interval;
-                        loop {
-                            tokio::time::sleep_until(wakeup_time).await;
-                            wakeup_time += interval;
-                            info!("trigger update of card names");
-                            match client
-                                .get("http://localhost:8000/card_names/update")
-                                .send()
-                                .await
-                            {
-                                Ok(_response) => {
-                                    info!("response to triggering card name update ok");
-                                }
-                                Err(e) => {
-                                    error!("error when trying to trigger card name update: {}", e);
-                                }
-                            }
-                        }
-                    })());
+                    tokio::task::spawn(trigger_card_name_update());
                 })
             },
         ))
@@ -203,24 +214,7 @@ fn rocket() -> _ {
             "create trigger for purging cache",
             |_| {
                 Box::pin(async move {
-                    tokio::task::spawn((|| async {
-                        let client = reqwest::Client::new();
-                        let interval = std::time::Duration::from_secs(24 * 60 * 60);
-                        let mut wakeup_time = tokio::time::Instant::now() + interval;
-                        loop {
-                            tokio::time::sleep_until(wakeup_time).await;
-                            wakeup_time += interval;
-                            info!("trigger cache purge");
-                            match client.get("http://localhost:8000/cache/purge").send().await {
-                                Ok(_response) => {
-                                    info!("response to triggering cache purge ok");
-                                }
-                                Err(e) => {
-                                    error!("error when trying to trigger cache purge: {}", e);
-                                }
-                            }
-                        }
-                    })());
+                    tokio::task::spawn(trigger_cache_purge());
                 })
             },
         ))

@@ -38,7 +38,7 @@ fn test_bmp() {
     // translate x, translate y, rotate, scale x, scale y
     // by default, an image is optimized to 300 DPI (if scale is None)
     // rotations and translations are always in relation to the lower left corner
-    image.add_to_layer(current_layer.clone(), ImageTransform::default());
+    image.add_to_layer(current_layer, ImageTransform::default());
 
     doc.save(&mut BufWriter::new(File::create("test_bmp.pdf").unwrap()))
         .unwrap();
@@ -61,7 +61,7 @@ fn test_png() {
 
     let image = Image::from_dynamic_image(&without_alpha);
 
-    image.add_to_layer(current_layer.clone(), ImageTransform::default());
+    image.add_to_layer(current_layer, ImageTransform::default());
 
     doc.save(&mut BufWriter::new(File::create("test_png.pdf").unwrap()))
         .unwrap();
@@ -83,14 +83,16 @@ fn test_jpg() {
 
     let image = Image::from_dynamic_image(&without_alpha);
 
-    let mut transform = ImageTransform::default();
-    transform.dpi = Some(DPI);
-    transform.translate_x = Some(Mm(10.0));
-    transform.translate_y = Some(Mm(10.0));
-    transform.scale_x = Some(IMAGE_WIDTH_CM / (IMAGE_WIDTH as f64) * DPCM);
-    transform.scale_y = Some(IMAGE_HEIGHT_CM / (IMAGE_HEIGHT as f64) * DPCM);
+    let transform = ImageTransform {
+        dpi: Some(DPI),
+        translate_x: Some(Mm(10.0)),
+        translate_y: Some(Mm(10.0)),
+        scale_x: Some(IMAGE_WIDTH_CM / (IMAGE_WIDTH as f64) * DPCM),
+        scale_y: Some(IMAGE_HEIGHT_CM / (IMAGE_HEIGHT as f64) * DPCM),
+        rotate: None,
+    };
     println!("the transform is {:?}", transform);
-    image.add_to_layer(current_layer.clone(), transform);
+    image.add_to_layer(current_layer, transform);
 
     doc.save(&mut BufWriter::new(File::create("test_jpg.pdf").unwrap()))
         .unwrap();
@@ -120,26 +122,28 @@ fn test_rgb() {
         &mut custom_rgb,
         &without_alpha,
         2 * IMAGE_WIDTH,
-        1 * IMAGE_HEIGHT,
+        IMAGE_HEIGHT,
     );
     overlay(
         &mut custom_rgb,
         &without_alpha,
-        1 * IMAGE_WIDTH,
+        IMAGE_WIDTH,
         2 * IMAGE_HEIGHT,
     );
 
-    let mut transform = ImageTransform::default();
-    transform.dpi = Some(DPI);
-    transform.translate_x = Some((A4_WIDTH - Mm(3.0 * IMAGE_WIDTH_CM * 10.0)) / 2.0);
-    transform.translate_y = Some((A4_HEIGHT - Mm(3.0 * IMAGE_HEIGHT_CM * 10.0)) / 2.0);
-    transform.scale_x = Some(IMAGE_WIDTH_CM / (IMAGE_WIDTH as f64) * DPCM);
-    transform.scale_y = Some(IMAGE_HEIGHT_CM / (IMAGE_HEIGHT as f64) * DPCM);
+    let transform = ImageTransform {
+        dpi: Some(DPI),
+        translate_x: Some((A4_WIDTH - Mm(3.0 * IMAGE_WIDTH_CM * 10.0)) / 2.0),
+        translate_y: Some((A4_HEIGHT - Mm(3.0 * IMAGE_HEIGHT_CM * 10.0)) / 2.0),
+        scale_x: Some(IMAGE_WIDTH_CM / (IMAGE_WIDTH as f64) * DPCM),
+        scale_y: Some(IMAGE_HEIGHT_CM / (IMAGE_HEIGHT as f64) * DPCM),
+        rotate: None,
+    };
     println!("the transform is {:?}", transform);
 
     let dynamic_image = DynamicImage::ImageRgb8(custom_rgb);
 
-    Image::from_dynamic_image(&dynamic_image).add_to_layer(current_layer.clone(), transform);
+    Image::from_dynamic_image(&dynamic_image).add_to_layer(current_layer, transform);
 
     doc.save(&mut BufWriter::new(File::create("test_rgb.pdf").unwrap()))
         .unwrap();
