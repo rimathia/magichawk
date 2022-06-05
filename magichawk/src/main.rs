@@ -76,15 +76,15 @@ async fn create_pdf(
 }
 
 #[get("/cache/list")]
-async fn list_cache(state: &State<Mutex<magichawk::ScryfallCache>>) -> content::Html<String> {
-    content::Html(state.lock().await.list())
+async fn list_cache(state: &State<Mutex<magichawk::ScryfallCache>>) -> content::RawHtml<String> {
+    content::RawHtml(state.lock().await.list())
 }
 
 #[get("/cache/purge?<age_seconds>")]
 async fn purge_cache(
     state: &State<Mutex<magichawk::ScryfallCache>>,
     age_seconds: Option<i64>,
-) -> content::Html<String> {
+) -> content::RawHtml<String> {
     state
         .lock()
         .await
@@ -93,23 +93,25 @@ async fn purge_cache(
 }
 
 #[get("/card_names/full")]
-async fn card_names_full(card_data_m: &State<Mutex<magichawk::CardData>>) -> content::Json<String> {
+async fn card_names_full(
+    card_data_m: &State<Mutex<magichawk::CardData>>,
+) -> content::RawJson<String> {
     let card_names = &card_data_m.lock().await.card_names;
     let serialized: String = serde_json::to_string_pretty(card_names).unwrap();
-    content::Json(serialized)
+    content::RawJson(serialized)
 }
 
 #[get("/card_names/short")]
 async fn card_names_short(
     card_data_m: &State<Mutex<magichawk::CardData>>,
-) -> content::Html<String> {
+) -> content::RawHtml<String> {
     let card_names = &card_data_m.lock().await.card_names;
     let names = &card_names.names;
     let update: String = match card_names.date {
         Some(date) => date.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
         None => "not present (this indicates a bug)".to_string(),
     };
-    content::Html(format!(
+    content::RawHtml(format!(
         "There are {} card names, last update approximately {}, the first three are {:?}, {:?}, {:?}",
         names.len(),
         update,
@@ -123,23 +125,25 @@ async fn card_names_short(
 async fn card_names_update(
     card_data_m: &State<Mutex<magichawk::CardData>>,
     client: &State<ScryfallClient>,
-) -> content::Html<String> {
-    content::Html(match card_data_m.lock().await.update_names(client).await {
+) -> content::RawHtml<String> {
+    content::RawHtml(match card_data_m.lock().await.update_names(client).await {
         Some(_) => "card names updated".to_string(),
         None => "couldn't update card names".to_string(),
     })
 }
 
 #[get("/lookup")]
-async fn lookup(card_data_m: &State<Mutex<magichawk::CardData>>) -> content::Html<String> {
+async fn lookup(card_data_m: &State<Mutex<magichawk::CardData>>) -> content::RawHtml<String> {
     let lookup = &card_data_m.lock().await.lookup;
-    content::Html(format!("{:?}", lookup))
+    content::RawHtml(format!("{:?}", lookup))
 }
 
 #[get("/card_data/short")]
-async fn card_data_short(card_data_m: &State<Mutex<magichawk::CardData>>) -> content::Html<String> {
+async fn card_data_short(
+    card_data_m: &State<Mutex<magichawk::CardData>>,
+) -> content::RawHtml<String> {
     let card_data = card_data_m.lock().await;
-    content::Html(format!(
+    content::RawHtml(format!(
         "There are {} different card names and {} (card name, set) combinations",
         card_data.printings.len(),
         card_data
@@ -151,10 +155,12 @@ async fn card_data_short(card_data_m: &State<Mutex<magichawk::CardData>>) -> con
 }
 
 #[get("/card_data/full")]
-async fn card_data_full(card_data_m: &State<Mutex<magichawk::CardData>>) -> content::Json<String> {
+async fn card_data_full(
+    card_data_m: &State<Mutex<magichawk::CardData>>,
+) -> content::RawJson<String> {
     let card_data = card_data_m.lock().await;
     let serialized: String = serde_json::to_string_pretty(&card_data.printings).unwrap();
-    content::Json(serialized)
+    content::RawJson(serialized)
 }
 
 #[derive(Debug, rocket::serde::Deserialize)]
