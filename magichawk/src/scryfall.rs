@@ -8,7 +8,7 @@ use crate::scryfall_client::{blocking_call, ScryfallClient};
 const SCRYFALL_CARD_NAMES: &str = "https://api.scryfall.com/catalog/card-names";
 
 fn encode_card_name(name: &str) -> String {
-    name.replace(" ", "+").replace("//", "")
+    name.replace(' ', "+").replace("//", "")
 }
 
 #[derive(Serialize, Deserialize)]

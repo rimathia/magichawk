@@ -3,7 +3,7 @@ extern crate regex;
 use lazy_static::lazy_static;
 use regex::{Match, Regex};
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct DecklistEntry {
     pub multiple: i32,
     pub name: String,
@@ -36,7 +36,7 @@ impl DecklistEntry {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct ParsedDecklistLine<'a> {
     line: &'a str,
     entry: Option<DecklistEntry>,

@@ -171,7 +171,7 @@ pub async fn image_lines_from_decklist(
     image_lines
 }
 
-#[derive(Debug, PartialEq, Copy, Clone, FromFormField)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone, FromFormField)]
 pub enum BacksideMode {
     Zero,
     One,
