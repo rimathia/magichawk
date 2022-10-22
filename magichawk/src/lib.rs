@@ -340,8 +340,8 @@ where
                         white_pixel,
                     )),
                     &without_alpha,
-                    pos_hor * IMAGE_WIDTH,
-                    pos_ver * IMAGE_HEIGHT,
+                    (pos_hor * IMAGE_WIDTH).into(),
+                    (pos_ver * IMAGE_HEIGHT).into(),
                 );
                 pos_hor += 1;
                 if pos_hor == 3 {
