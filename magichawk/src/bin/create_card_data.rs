@@ -1,5 +1,5 @@
 use clap::Parser;
-use magichawk::{CardPrinting, ScryfallCardNames};
+use magichawk::{CardPrinting, ScryfallCardNames, ScryfallObject, ScryfallObjectBack};
 use serde_json::from_reader;
 use std::fs::File;
 
@@ -25,7 +25,6 @@ fn main() {
     );
 
     let f = File::open(&opts.input).unwrap();
-    let outputfile = File::create(&opts.output).unwrap();
 
     let default_cards: Vec<serde_json::Map<String, serde_json::Value>> = from_reader(f).unwrap();
     println!(
@@ -34,13 +33,62 @@ fn main() {
         &opts.input
     );
 
-    let mut card_data: std::collections::HashMap<String, Vec<CardPrinting>> =
+    let mut card_data_without_meld_results: std::collections::HashMap<String, Vec<ScryfallObject>> =
         std::collections::HashMap::new();
     for default_card in default_cards.iter() {
-        magichawk::insert_scryfall_object(&mut card_data, &nontoken_names, default_card);
+        let scryfall_object = ScryfallObject::from_dict(default_card);
+        match scryfall_object {
+            Some(scryfall_object) => {
+                card_data_without_meld_results
+                    .entry(scryfall_object.name.clone())
+                    .or_default()
+                    .push(scryfall_object);
+            }
+            None => {
+                print!("couldn't convert scryfall object {:?}", default_card);
+            }
+        }
     }
 
-    serde_json::to_writer(outputfile, &card_data).unwrap();
+    let mut card_data: std::collections::HashMap<String, Vec<CardPrinting>> =
+        std::collections::HashMap::new();
+    for (name, scryfall_objects) in card_data_without_meld_results.iter() {
+        for scryfall_object in scryfall_objects {
+            let back = match &scryfall_object.border_crop_back {
+                Some(ScryfallObjectBack::MeldResultName(meld_name)) => {
+                    let relateds = card_data_without_meld_results.get(meld_name);
+                    match relateds {
+                        Some(relateds) => {
+                            let matching_set =
+                                relateds.iter().find(|x| x.set == scryfall_object.set);
+                            match matching_set {
+                                Some(matching_set) => Some(matching_set.border_crop.clone()),
+                                None => {
+                                    print!(
+                                        "related card {} with set {} not found",
+                                        meld_name, scryfall_object.set
+                                    );
+                                    None
+                                }
+                            }
+                        }
+                        None => {
+                            print!("couldn't find meld result {}", meld_name);
+                            None
+                        }
+                    }
+                }
+                Some(ScryfallObjectBack::Uri(uri)) => Some(uri).cloned(),
+                None => None,
+            };
+            let printings = card_data.entry(name.clone()).or_default();
+            printings.push(CardPrinting {
+                set: scryfall_object.set.clone(),
+                border_crop: scryfall_object.border_crop.clone(),
+                border_crop_back: back,
+            });
+        }
+    }
 
     let different_cards: usize = card_data
         .iter()
@@ -52,4 +100,7 @@ fn main() {
         different_cards,
         &opts.output
     );
+
+    let outputfile = File::create(&opts.output).unwrap();
+    serde_json::to_writer(outputfile, &card_data).unwrap();
 }

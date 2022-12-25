@@ -28,8 +28,11 @@ mod pdf;
 pub use crate::pdf::page_images_to_pdf;
 
 mod scryfall;
-pub use scryfall::{insert_scryfall_object, CardPrinting, Printings, ScryfallCardNames};
-use scryfall::{query_scryfall_by_name, ScryfallCard};
+pub use scryfall::{
+    insert_scryfall_object, CardPrinting, CardPrintings, ScryfallCardNames, ScryfallObject,
+    ScryfallObjectBack,
+};
+use scryfall::{query_scryfall_by_name, Card};
 
 mod scryfall_client;
 pub use crate::scryfall_client::ScryfallClient;
@@ -44,7 +47,7 @@ pub const IMAGE_HEIGHT_CM: f64 = 8.7;
 pub const IMAGE_WIDTH_CM: f64 = IMAGE_HEIGHT_CM * IMAGE_WIDTH as f64 / IMAGE_HEIGHT as f64;
 
 pub struct ImageLine {
-    pub card: ScryfallCard,
+    pub card: Card,
     pub front: i32,
     pub back: i32,
 }
@@ -52,14 +55,14 @@ pub struct ImageLine {
 pub struct CardData {
     pub card_names: ScryfallCardNames,
     pub lookup: CardNameLookup,
-    pub printings: Printings,
+    pub printings: CardPrintings,
 }
 
 impl CardData {
-    pub async fn from_bulk(bulk: Printings, client: &ScryfallClient) -> Option<CardData> {
+    pub async fn from_bulk(bulk: CardPrintings, client: &ScryfallClient) -> Option<CardData> {
         let card_names = ScryfallCardNames::from_api_call(client).await?;
         let lookup = CardNameLookup::from_card_names(&card_names.names);
-        let printings: Printings = bulk
+        let printings: CardPrintings = bulk
             .into_iter()
             .map(|(key, value)| (key.to_lowercase(), value))
             .collect();
@@ -139,7 +142,7 @@ impl CardData {
         Some(ImageLine {
             front: frontmult,
             back: backmult,
-            card: ScryfallCard {
+            card: Card {
                 name: namelookup.name,
                 printing: printing.clone(),
             },

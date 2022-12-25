@@ -232,7 +232,7 @@ fn rocket() -> _ {
             |rocket| async {
                 let file_name = rocket.state::<AppConfig>().unwrap().card_data.clone();
                 let file_handle = File::open(file_name).unwrap();
-                let bulk: magichawk::Printings = serde_json::from_reader(file_handle).unwrap();
+                let bulk: magichawk::CardPrintings = serde_json::from_reader(file_handle).unwrap();
 
                 let client = rocket.state::<ScryfallClient>().unwrap();
                 let card_data = magichawk::CardData::from_bulk(bulk, client).await.unwrap();
