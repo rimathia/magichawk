@@ -114,10 +114,11 @@ async fn card_names_update(
     card_data_m: &State<Mutex<magichawk::CardData>>,
     client: &State<ScryfallClient>,
 ) -> content::RawHtml<String> {
-    let n_before = card_data_m.lock().await.card_names.names.len();
-    let response = match card_data_m.lock().await.update_names(client).await {
+    let mut card_data = card_data_m.lock().await;
+    let n_before = card_data.card_names.names.len();
+    let response = match card_data.update_names(client).await {
         Some(_) => {
-            let n_after = card_data_m.lock().await.card_names.names.len();
+            let n_after = card_data.card_names.names.len();
             format!(
                 "card names updated, {} names before, {} names after",
                 n_before, n_after
