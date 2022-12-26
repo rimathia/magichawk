@@ -1,5 +1,5 @@
 [default]
-card_data = "test_input/card_data_reduced.json"
+card_data = "assets/card_data.json"
 log_level = "debug"
 
 [release]

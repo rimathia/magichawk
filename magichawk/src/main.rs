@@ -31,24 +31,12 @@ async fn create_pdf(
 
     let mut expanded: Vec<&DynamicImage> = Vec::new();
     for line in cards.iter() {
-        if line.front > 0 {
-            if let Some(image) = cache.get(&line.card.printing.border_crop) {
-                for _i in 0..line.front {
+        for (uri, multiplicity) in &line.images {
+            if let Some(image) = cache.get(&uri) {
+                for _i in 0..*multiplicity {
                     expanded.push(image);
                 }
             }
-        }
-        if line.back > 0 {
-            match &line.card.printing.border_crop_back {
-                Some(uri) => {
-                    if let Some(image) = cache.get(uri) {
-                        for _i in 0..line.back {
-                            expanded.push(image);
-                        }
-                    }
-                }
-                None => {}
-            };
         }
     }
 
@@ -126,10 +114,18 @@ async fn card_names_update(
     card_data_m: &State<Mutex<magichawk::CardData>>,
     client: &State<ScryfallClient>,
 ) -> content::RawHtml<String> {
-    content::RawHtml(match card_data_m.lock().await.update_names(client).await {
-        Some(_) => "card names updated".to_string(),
+    let n_before = card_data_m.lock().await.card_names.names.len();
+    let response = match card_data_m.lock().await.update_names(client).await {
+        Some(_) => {
+            let n_after = card_data_m.lock().await.card_names.names.len();
+            format!(
+                "card names updated, {} names before, {} names after",
+                n_before, n_after
+            )
+        }
         None => "couldn't update card names".to_string(),
-    })
+    };
+    content::RawHtml(response)
 }
 
 #[get("/lookup")]

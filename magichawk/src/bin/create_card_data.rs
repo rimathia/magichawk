@@ -1,7 +1,8 @@
 use clap::Parser;
-use magichawk::{CardPrinting, ScryfallCardNames, ScryfallObject, ScryfallObjectBack};
+use magichawk::{CardPrintings, MinimalScryfallObject, ScryfallCardNames};
 use serde_json::from_reader;
 use std::fs::File;
+use std::io::BufReader;
 
 /// Process a bulk "Default Cards" file from the Scryfall API into a card data file for magichawk,
 /// see https://scryfall.com/docs/api/bulk-data for the bulk data.
@@ -12,6 +13,10 @@ struct Opts {
     input: String,
     /// output filename
     output: String,
+    /// file for problem cases
+    unconverted: String,
+    /// file for objects which aren't cards
+    notcards: String,
 }
 
 fn main() {
@@ -25,68 +30,36 @@ fn main() {
     );
 
     let f = File::open(&opts.input).unwrap();
+    let reader = BufReader::new(f);
 
-    let default_cards: Vec<serde_json::Map<String, serde_json::Value>> = from_reader(f).unwrap();
+    let default_cards: Vec<serde_json::Map<String, serde_json::Value>> =
+        from_reader(reader).unwrap();
     println!(
-        "there are {} entries in {}",
+        "there are {} entries in {}\n",
         default_cards.len(),
         &opts.input
     );
 
-    let mut card_data_without_meld_results: std::collections::HashMap<String, Vec<ScryfallObject>> =
-        std::collections::HashMap::new();
+    let mut unconverted = Vec::new();
+    let mut not_cards = Vec::new();
+
+    let mut card_data = CardPrintings::new();
     for default_card in default_cards.iter() {
-        let scryfall_object = ScryfallObject::from_dict(default_card);
+        let scryfall_object = MinimalScryfallObject::from_dict(default_card);
         match scryfall_object {
             Some(scryfall_object) => {
-                card_data_without_meld_results
-                    .entry(scryfall_object.name.clone())
-                    .or_default()
-                    .push(scryfall_object);
+                if nontoken_names.names.contains(&scryfall_object.name) {
+                    card_data
+                        .entry(scryfall_object.name.clone())
+                        .or_default()
+                        .push(scryfall_object);
+                } else {
+                    not_cards.push(default_card);
+                }
             }
             None => {
-                print!("couldn't convert scryfall object {:?}", default_card);
+                unconverted.push(default_card);
             }
-        }
-    }
-
-    let mut card_data: std::collections::HashMap<String, Vec<CardPrinting>> =
-        std::collections::HashMap::new();
-    for (name, scryfall_objects) in card_data_without_meld_results.iter() {
-        for scryfall_object in scryfall_objects {
-            let back = match &scryfall_object.border_crop_back {
-                Some(ScryfallObjectBack::MeldResultName(meld_name)) => {
-                    let relateds = card_data_without_meld_results.get(meld_name);
-                    match relateds {
-                        Some(relateds) => {
-                            let matching_set =
-                                relateds.iter().find(|x| x.set == scryfall_object.set);
-                            match matching_set {
-                                Some(matching_set) => Some(matching_set.border_crop.clone()),
-                                None => {
-                                    print!(
-                                        "related card {} with set {} not found",
-                                        meld_name, scryfall_object.set
-                                    );
-                                    None
-                                }
-                            }
-                        }
-                        None => {
-                            print!("couldn't find meld result {}", meld_name);
-                            None
-                        }
-                    }
-                }
-                Some(ScryfallObjectBack::Uri(uri)) => Some(uri).cloned(),
-                None => None,
-            };
-            let printings = card_data.entry(name.clone()).or_default();
-            printings.push(CardPrinting {
-                set: scryfall_object.set.clone(),
-                border_crop: scryfall_object.border_crop.clone(),
-                border_crop_back: back,
-            });
         }
     }
 
@@ -95,7 +68,7 @@ fn main() {
         .map(|(_name, printings)| printings.len())
         .sum();
     println!(
-        "there are {} card names and {} (card name, set) combinations in {}",
+        "there are {} card names and {} (card name, set) combinations in {}\n",
         card_data.len(),
         different_cards,
         &opts.output
@@ -103,4 +76,29 @@ fn main() {
 
     let outputfile = File::create(&opts.output).unwrap();
     serde_json::to_writer(outputfile, &card_data).unwrap();
+
+    println!(
+        "there are {} objects which couldn't be converted",
+        unconverted.len()
+    );
+
+    let unconverted_with_image: Vec<&serde_json::Map<String, serde_json::Value>> = unconverted
+        .into_iter()
+        .filter(|e| e["image_status"] != "missing")
+        .collect();
+
+    println!(
+        "there are {} objects which couldn't be converted which have image data, saved in {}",
+        unconverted_with_image.len(),
+        &opts.unconverted
+    );
+
+    {
+        let problemfile = File::create(&opts.unconverted).unwrap();
+        serde_json::to_writer(problemfile, &unconverted_with_image).unwrap();
+    }
+    {
+        let notcardsfile = File::create(&opts.notcards).unwrap();
+        serde_json::to_writer(notcardsfile, &not_cards).unwrap();
+    }
 }
