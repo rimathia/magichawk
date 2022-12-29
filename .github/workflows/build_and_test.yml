@@ -1,3 +1,7 @@
+on: [push]
+
+name: CI
+
 jobs:
   build_and_test:
     name: build and test magichawk
