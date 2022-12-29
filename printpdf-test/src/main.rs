@@ -33,7 +33,8 @@ fn test_bmp() {
     // this is an issue of the image library, not a fault of printpdf
     let mut image_file = File::open("assets/img/BMP_test.bmp").expect("couldn't find BMP_test.bmp");
     let image =
-        Image::try_from(image_crate::bmp::BmpDecoder::new(&mut image_file).unwrap()).unwrap();
+        Image::try_from(image_crate::codecs::bmp::BmpDecoder::new(&mut image_file).unwrap())
+            .unwrap();
 
     // translate x, translate y, rotate, scale x, scale y
     // by default, an image is optimized to 300 DPI (if scale is None)
@@ -121,14 +122,14 @@ fn test_rgb() {
     overlay(
         &mut custom_rgb,
         &without_alpha,
-        2 * IMAGE_WIDTH,
-        IMAGE_HEIGHT,
+        (2 * IMAGE_WIDTH).into(),
+        IMAGE_HEIGHT.into(),
     );
     overlay(
         &mut custom_rgb,
         &without_alpha,
-        IMAGE_WIDTH,
-        2 * IMAGE_HEIGHT,
+        IMAGE_WIDTH.into(),
+        (2 * IMAGE_HEIGHT).into(),
     );
 
     let transform = ImageTransform {
