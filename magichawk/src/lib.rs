@@ -125,19 +125,15 @@ impl CardData {
             .clone();
         match &printing.meld_result {
             Some(meld_result) => {
-                let meld_result_lookup = self.lookup.find(&meld_result);
-                match meld_result_lookup {
-                    Some(meld_result_lookup) => {
-                        self.ensure_contains(&meld_result_lookup, client).await;
-                        let matchingprintings_meld =
-                            self.printings.get(&meld_result_lookup.name)?;
-                        let printing_meld = matchingprintings_meld
-                            .iter()
-                            .find(set_matches)
-                            .unwrap_or(matchingprintings_meld.iter().next()?);
-                        printing.border_crop_back = Some(printing_meld.border_crop.clone());
-                    }
-                    None => {}
+                let meld_result_lookup = self.lookup.find(meld_result);
+                if let Some(meld_result_lookup) = meld_result_lookup {
+                    self.ensure_contains(&meld_result_lookup, client).await;
+                    let matchingprintings_meld = self.printings.get(&meld_result_lookup.name)?;
+                    let printing_meld = matchingprintings_meld
+                        .iter()
+                        .find(set_matches)
+                        .unwrap_or(matchingprintings_meld.iter().next()?);
+                    printing.border_crop_back = Some(printing_meld.border_crop.clone());
                 }
             }
             None => {}
@@ -167,7 +163,7 @@ impl CardData {
         }
         Some(ImageLine {
             name: entry.name.clone(),
-            images: images,
+            images,
         })
     }
 }
@@ -300,7 +296,7 @@ impl ScryfallCache {
 
     pub async fn ensure_contains_line(&mut self, line: &ImageLine, client: &ScryfallClient) {
         for (uri, _mult) in &line.images {
-            self.ensure_contains(&uri, client).await;
+            self.ensure_contains(uri, client).await;
         }
     }
 
