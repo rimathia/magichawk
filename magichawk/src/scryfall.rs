@@ -1,7 +1,7 @@
-use chrono::{DateTime, Utc};
 use log::{error, info};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use time::OffsetDateTime;
 
 use crate::scryfall_client::{blocking_call, ScryfallClient};
 
@@ -16,7 +16,7 @@ pub struct ScryfallCardNames {
     pub object: String,
     pub uri: String,
     pub total_values: i32,
-    pub date: Option<DateTime<Utc>>,
+    pub date: Option<OffsetDateTime>,
     #[serde(alias = "data")]
     pub names: Vec<String>,
 }
@@ -30,7 +30,7 @@ impl ScryfallCardNames {
             .json::<ScryfallCardNames>()
             .await
             .ok()?;
-        card_names.date = Some(Utc::now());
+        card_names.date = Some(OffsetDateTime::now_utc());
         for name in card_names.names.iter_mut() {
             *name = name.to_lowercase();
         }
@@ -42,7 +42,7 @@ impl ScryfallCardNames {
             .ok()?
             .json::<ScryfallCardNames>()
             .ok()?;
-        card_names.date = Some(Utc::now());
+        card_names.date = Some(OffsetDateTime::now_utc());
         for name in card_names.names.iter_mut() {
             *name = name.to_lowercase();
         }

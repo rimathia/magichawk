@@ -8,6 +8,7 @@ use rocket::http::{ContentType, Status};
 use rocket::{fairing::AdHoc, fs::FileServer, response::content, State};
 use std::fs::File;
 use std::path::Path;
+use time::macros::format_description;
 use tokio::sync::Mutex;
 
 use magichawk::ScryfallClient;
@@ -76,7 +77,7 @@ async fn purge_cache(
     state
         .lock()
         .await
-        .purge(age_seconds.map(chrono::Duration::seconds));
+        .purge(age_seconds.map(time::Duration::seconds));
     list_cache(state).await
 }
 
@@ -96,7 +97,10 @@ async fn card_names_short(
     let card_names = &card_data_m.lock().await.card_names;
     let names = &card_names.names;
     let update: String = match card_names.date {
-        Some(date) => date.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+        Some(date) => date
+            .format(format_description!("%Y-%m-%dT%H:%M:%SZ"))
+            .unwrap_or("?".to_string()),
+
         None => "not present (this indicates a bug)".to_string(),
     };
     content::RawHtml(format!(
