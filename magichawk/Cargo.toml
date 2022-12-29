@@ -1,6 +1,6 @@
 [package]
 name = "magichawk"
-version = "0.3.6"
+version = "0.3.7"
 authors = ["Mathias Ritzmann <rimathia@users.noreply.github.com>"]
 edition = "2021"
 default-run = "magichawk"
@@ -8,18 +8,18 @@ default-run = "magichawk"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = {version = ">=3.1.18", features=["derive"]}
-itertools = ">=0.10.0"
-image = ">=0.23"
+clap = {version = ">=4.0.32", features=["derive"]}
+itertools = ">=0.10.5"
+image = ">=0.24.5"
 lazy_static = ">=1.4"
-log = ">=0.4"
-ngrammatic = ">=0.3"
-ord_subset = ">=3"
+log = ">=0.4.17"
+ngrammatic = ">=0.4"
+ord_subset = ">=3.1.1"
 printpdf = { version = ">=0.5.3", features=["embedded_images"] }
-regex = ">=1"
-reqwest = { version = ">=0.11.8", features=["blocking", "json"]}
+regex = ">=1.7.0"
+reqwest = { version = ">=0.11.13", default-features=false, features=["blocking", "json", "rustls-tls"]}
 rocket = {version = ">=0.5.0-rc.2", features=["json"]}
-serde = {version = ">=1.0", features = ["derive"]}
-serde_json = ">=1.0"
+serde = {version = ">=1.0.151", features = ["derive"]}
+serde_json = ">=1.0.91"
+tokio = {version = ">=1.23.0", features=["time"]}
 time = { version = ">=0.3.17", features=["serde", "formatting"] }
-tokio = {version = ">=1.15.0", features=["time"]}

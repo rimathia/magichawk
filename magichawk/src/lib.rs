@@ -28,8 +28,10 @@ mod pdf;
 pub use crate::pdf::page_images_to_pdf;
 
 mod scryfall;
-pub use scryfall::{insert_scryfall_object, CardPrinting, Printings, ScryfallCardNames};
-use scryfall::{query_scryfall_by_name, ScryfallCard};
+use scryfall::query_scryfall_by_name;
+pub use scryfall::{
+    insert_scryfall_object, CardPrintings, MinimalScryfallObject, ScryfallCardNames,
+};
 
 mod scryfall_client;
 pub use crate::scryfall_client::ScryfallClient;
@@ -44,22 +46,21 @@ pub const IMAGE_HEIGHT_CM: f64 = 8.7;
 pub const IMAGE_WIDTH_CM: f64 = IMAGE_HEIGHT_CM * IMAGE_WIDTH as f64 / IMAGE_HEIGHT as f64;
 
 pub struct ImageLine {
-    pub card: ScryfallCard,
-    pub front: i32,
-    pub back: i32,
+    pub name: String,
+    pub images: Vec<(String, i32)>,
 }
 
 pub struct CardData {
     pub card_names: ScryfallCardNames,
     pub lookup: CardNameLookup,
-    pub printings: Printings,
+    pub printings: CardPrintings,
 }
 
 impl CardData {
-    pub async fn from_bulk(bulk: Printings, client: &ScryfallClient) -> Option<CardData> {
+    pub async fn from_bulk(bulk: CardPrintings, client: &ScryfallClient) -> Option<CardData> {
         let card_names = ScryfallCardNames::from_api_call(client).await?;
         let lookup = CardNameLookup::from_card_names(&card_names.names);
-        let printings: Printings = bulk
+        let printings: CardPrintings = bulk
             .into_iter()
             .map(|(key, value)| (key.to_lowercase(), value))
             .collect();
@@ -113,13 +114,34 @@ impl CardData {
         debug!("backside in get_card: {:?}", backside);
         self.ensure_contains(&namelookup, client).await;
         let matchingprintings = self.printings.get(&namelookup.name)?;
-        let printing = matchingprintings
+        let set_matches = |p: &&MinimalScryfallObject| match &entry.set {
+            Some(s) => p.set == s.to_lowercase(),
+            None => false,
+        };
+        let mut printing = matchingprintings
             .iter()
-            .find(|p| match &entry.set {
-                Some(s) => p.set == s.to_lowercase(),
-                None => false,
-            })
-            .unwrap_or(matchingprintings.iter().next()?);
+            .find(set_matches)
+            .unwrap_or(matchingprintings.iter().next()?)
+            .clone();
+        match &printing.meld_result {
+            Some(meld_result) => {
+                let meld_result_lookup = self.lookup.find(&meld_result);
+                match meld_result_lookup {
+                    Some(meld_result_lookup) => {
+                        self.ensure_contains(&meld_result_lookup, client).await;
+                        let matchingprintings_meld =
+                            self.printings.get(&meld_result_lookup.name)?;
+                        let printing_meld = matchingprintings_meld
+                            .iter()
+                            .find(set_matches)
+                            .unwrap_or(matchingprintings_meld.iter().next()?);
+                        printing.border_crop_back = Some(printing_meld.border_crop.clone());
+                    }
+                    None => {}
+                }
+            }
+            None => {}
+        }
         let frontmult = if backside == BacksideMode::BackOnly && printing.border_crop_back.is_some()
         {
             0
@@ -136,13 +158,16 @@ impl CardData {
             0
         };
         debug!("frontmult: {}, backmult: {}", frontmult, backmult);
+        let mut images = Vec::new();
+        if frontmult > 0 {
+            images.push((printing.border_crop, frontmult))
+        }
+        if backmult > 0 {
+            images.push((printing.border_crop_back.unwrap(), backmult))
+        }
         Some(ImageLine {
-            front: frontmult,
-            back: backmult,
-            card: ScryfallCard {
-                name: namelookup.name,
-                printing: printing.clone(),
-            },
+            name: entry.name.clone(),
+            images: images,
         })
     }
 }
@@ -274,17 +299,8 @@ impl ScryfallCache {
     }
 
     pub async fn ensure_contains_line(&mut self, line: &ImageLine, client: &ScryfallClient) {
-        if line.front > 0 {
-            self.ensure_contains(&line.card.printing.border_crop, client)
-                .await;
-        }
-        if line.back > 0 {
-            match &line.card.printing.border_crop_back {
-                Some(uri) => {
-                    self.ensure_contains(uri, client).await;
-                }
-                None => {}
-            }
+        for (uri, _mult) in &line.images {
+            self.ensure_contains(&uri, client).await;
         }
     }
 
