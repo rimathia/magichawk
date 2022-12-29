@@ -73,8 +73,8 @@ impl MinimalScryfallObject {
     pub fn from_dict(
         d: &serde_json::Map<String, serde_json::Value>,
     ) -> Option<MinimalScryfallObject> {
-        let n: String = d["name"].as_str()?.to_string().to_lowercase();
-        let s = d["set"].as_str()?.to_string().to_lowercase();
+        let name: String = d["name"].as_str()?.to_string().to_lowercase();
+        let set = d["set"].as_str()?.to_string().to_lowercase();
 
         let (border_crop, border_crop_back) = {
             if d.contains_key("image_uris") {
@@ -113,11 +113,11 @@ impl MinimalScryfallObject {
             None
         };
         Some(MinimalScryfallObject {
-            name: n,
-            set: s,
-            border_crop: border_crop,
-            border_crop_back: border_crop_back,
-            meld_result: meld_result,
+            name,
+            set,
+            border_crop,
+            border_crop_back,
+            meld_result,
         })
     }
 }
@@ -278,7 +278,7 @@ pub fn insert_scryfall_object(
     object: &serde_json::Map<String, serde_json::Value>,
 ) {
     let maybe_minimal = MinimalScryfallObject::from_dict(object);
-    if !maybe_minimal.is_some() {
+    if maybe_minimal.is_none() {
         error!("couldn't read {:?} as a scryfall object", object);
         return;
     }

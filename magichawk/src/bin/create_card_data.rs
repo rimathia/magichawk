@@ -63,10 +63,7 @@ fn main() {
         }
     }
 
-    let different_cards: usize = card_data
-        .iter()
-        .map(|(_name, printings)| printings.len())
-        .sum();
+    let different_cards: usize = card_data.values().map(|printings| printings.len()).sum();
     println!(
         "there are {} card names and {} (card name, set) combinations in {}\n",
         card_data.len(),

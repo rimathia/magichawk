@@ -8,7 +8,6 @@ use rocket::http::{ContentType, Status};
 use rocket::{fairing::AdHoc, fs::FileServer, response::content, State};
 use std::fs::File;
 use std::path::Path;
-use time::macros::format_description;
 use tokio::sync::Mutex;
 
 use magichawk::ScryfallClient;
@@ -33,7 +32,7 @@ async fn create_pdf(
     let mut expanded: Vec<&DynamicImage> = Vec::new();
     for line in cards.iter() {
         for (uri, multiplicity) in &line.images {
-            if let Some(image) = cache.get(&uri) {
+            if let Some(image) = cache.get(uri) {
                 for _i in 0..*multiplicity {
                     expanded.push(image);
                 }
@@ -97,10 +96,7 @@ async fn card_names_short(
     let card_names = &card_data_m.lock().await.card_names;
     let names = &card_names.names;
     let update: String = match card_names.date {
-        Some(date) => date
-            .format(format_description!("%Y-%m-%dT%H:%M:%SZ"))
-            .unwrap_or("?".to_string()),
-
+        Some(date) => format!("{}", date),
         None => "not present (this indicates a bug)".to_string(),
     };
     content::RawHtml(format!(
@@ -149,8 +145,8 @@ async fn card_data_short(
         card_data.printings.len(),
         card_data
             .printings
-            .iter()
-            .map(|(_name, printings)| printings.len())
+            .values()
+            .map(|printings| printings.len())
             .sum::<usize>()
     ))
 }
