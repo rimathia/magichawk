@@ -1,4 +1,3 @@
-extern crate chrono;
 extern crate log;
 extern crate printpdf;
 extern crate regex;
@@ -6,15 +5,16 @@ extern crate reqwest;
 extern crate rocket;
 extern crate serde;
 extern crate serde_json;
+extern crate time;
 extern crate tokio;
 
-use chrono::{DateTime, Utc};
 use log::{debug, error, info};
 use printpdf::image_crate::{imageops::overlay, DynamicImage, Rgb, RgbImage};
 use rocket::form::FromFormField;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::fmt;
 use std::string::String;
+use time::OffsetDateTime;
 use Option::{None, Some};
 
 mod decklist;
@@ -205,14 +205,14 @@ pub async fn query_image_uri(uri: &str, client: &ScryfallClient) -> Option<Dynam
 }
 
 pub struct CachedImageResponse {
-    t: DateTime<Utc>,
+    t: OffsetDateTime,
     image: DynamicImage,
 }
 
 impl CachedImageResponse {
     pub fn from_image(i: DynamicImage) -> CachedImageResponse {
         CachedImageResponse {
-            t: Utc::now(),
+            t: OffsetDateTime::now_utc(),
             image: i,
         }
     }
@@ -231,18 +231,18 @@ impl fmt::Debug for CachedImageResponse {
 }
 
 pub struct ScryfallCache {
-    last_purge: DateTime<Utc>,
+    last_purge: OffsetDateTime,
     images: std::collections::HashMap<String, CachedImageResponse>,
 }
 
 impl ScryfallCache {
-    fn get_max_age() -> chrono::Duration {
-        chrono::Duration::days(14)
+    fn get_max_age() -> time::Duration {
+        time::Duration::days(14)
     }
 
     pub fn new() -> ScryfallCache {
         ScryfallCache {
-            last_purge: Utc::now(),
+            last_purge: OffsetDateTime::now_utc(),
             images: std::collections::HashMap::new(),
         }
     }
@@ -259,7 +259,7 @@ impl ScryfallCache {
                 match image_query {
                     Some(image) => {
                         token.insert(CachedImageResponse {
-                            t: Utc::now(),
+                            t: OffsetDateTime::now_utc(),
                             image,
                         });
                         Some(())
@@ -302,8 +302,8 @@ impl ScryfallCache {
         desc
     }
 
-    pub fn purge(&mut self, max_age: Option<chrono::Duration>) {
-        let n = Utc::now();
+    pub fn purge(&mut self, max_age: Option<time::Duration>) {
+        let n = OffsetDateTime::now_utc();
         debug!("{} cached responses before purging", self.images.len());
         self.images
             .retain(|_, value| n - value.t < max_age.unwrap_or_else(ScryfallCache::get_max_age));
