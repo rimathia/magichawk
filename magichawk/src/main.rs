@@ -227,12 +227,16 @@ fn rocket() -> _ {
         .attach(AdHoc::on_ignite(
             "load card data from file",
             |rocket| async {
-                let file_name = rocket.state::<AppConfig>().unwrap().card_data.clone();
-                let file_handle = File::open(file_name).unwrap();
-                let bulk: magichawk::CardPrintings = serde_json::from_reader(file_handle).unwrap();
+                let card_data: Option<magichawk::CardData> = (|| async {
+                    let file_name = rocket.state::<AppConfig>().unwrap().card_data.clone();
+                    let file_handle = File::open(file_name).ok()?;
+                    let bulk: magichawk::CardPrintings =
+                        serde_json::from_reader(file_handle).ok()?;
 
-                let client = rocket.state::<ScryfallClient>().unwrap();
-                let card_data = magichawk::CardData::from_bulk(bulk, client).await.unwrap();
+                    let client = rocket.state::<ScryfallClient>()?;
+                    magichawk::CardData::from_bulk(bulk, client).await
+                })()
+                .await;
                 rocket.manage(Mutex::new(card_data))
             },
         ))
