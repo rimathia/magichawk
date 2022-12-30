@@ -1,5 +1,6 @@
+# based on
 # https://github.com/FedericoPonzi/rust-ci/blob/master/.github/workflows/CI.yml
-name: release
+name: CI 
 
 on:
   pull_request:
@@ -11,30 +12,33 @@ on:
 
 jobs:
   style:
-    name: Check Style
+    name: check style
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v1
+      - name: checkout
+        uses: actions/checkout@v3
 
-      - name: Install rust
-        uses: actions-rs/toolchain@v1
+      - name: install rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
           components: rustfmt
-          profile: minimal
-          override: true
 
-      - name: cargo fmt -- --check
-        uses: actions-rs/cargo@v1
+      - run: cargo fmt -- --check
+
+  clippy:
+    needs: [style]
+    name: check clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          command: fmt
-          args: --all -- --check
-
+          components: clippy
+      - run: cargo clippy
 
   test:
-    name: Test
-    needs: [style]
+    name: test
+    needs: [style, clippy]
     runs-on: ubuntu-latest
 
     strategy:
@@ -45,37 +49,25 @@ jobs:
             rust: beta
           - build: nightly
             rust: nightly
-            benches: true
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v1
+      - name: checkout
+        uses: actions/checkout@v3
 
-      - name: Install rust
-        uses: actions-rs/toolchain@v1
+      - name: install rust
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust || 'stable' }}
-          profile: minimal
-          override: true
 
-      - name: Build debug
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: ${{ matrix.features }}
+      - name: build
+        run: cargo build ${{ matrix.features }}
 
-      - name: Test
-        uses: actions-rs/cargo@v1
+      - name: test
+        uses: dtolnay/rust-toolchain@master
         with:
-          command: test
-          args: ${{ matrix.features }}
+          toolchain: ${{ matrix.rust || 'stable' }}
+        run: cargo test ${{ matrix.features }}
 
-      - name: Test all benches
-        if: matrix.benches
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --benches ${{ matrix.features }}
   create-release:
     name: deploy
     needs: [test]
@@ -85,24 +77,18 @@ jobs:
       matrix:
         target: [ x86_64-unknown-linux-gnu ]
     steps:
-      - name: Checkout
-        uses: actions/checkout@v1
-      - name: Install rust
-        uses: actions-rs/toolchain@v1
+      - name: checkout
+        uses: actions/checkout@v3
+      - name: install rust
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-          profile: minimal
-          override: true
-          target: ${{ matrix.target }}
+          targets: ${{ matrix.target }}
 
-      - name: Build target
-        uses: actions-rs/cargo@v1
-        with:
-          use-cross: true
-          command: build
-          args: --release --target ${{ matrix.target }}
+      - name: build target
+        run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Package
+      - name: package
         shell: bash
         run: |
           # TODO:
@@ -112,7 +98,7 @@ jobs:
           tar czvf ../../../magichawk-${{ matrix.target }}.tar.gz magichawk
           cd -
           
-      - name: Publish
+      - name: publish
         uses: softprops/action-gh-release@v1
         # TODO: if any of the build step fails, the release should be deleted.
         with:
