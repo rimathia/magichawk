@@ -65,42 +65,42 @@ jobs:
       - name: test
         run: cargo test ${{ matrix.features }}
 
-#  create-release:
-#    name: deploy
-#    needs: [test]
-#    if: startsWith(github.ref, 'refs/tags/')
-#    runs-on: ubuntu-latest
-#    strategy: 
-#      matrix:
-#        target: [ x86_64-unknown-linux-gnu ]
-#    steps:
-#      - name: checkout
-#        uses: actions/checkout@v3
-#      - name: install rust
-#        uses: dtolnay/rust-toolchain@master
-#        with:
-#          toolchain: stable
-#          targets: ${{ matrix.target }}
-#
-#      - name: build target
-#        run: cargo build --release --target ${{ matrix.target }}
-#
-#      - name: package
-#        shell: bash
-#        run: |
-#          # TODO:
-#          # strip target/${{ matrix.target }}/release/magichawk
-#          cd target/${{ matrix.target }}/release          
-#          # UPDATEME: replace the string "rust-ci" with your binary's name.
-#          tar czvf ../../../magichawk-${{ matrix.target }}.tar.gz magichawk
-#          cd -
-#          
-#      - name: publish
-#        uses: softprops/action-gh-release@v1
-#        # TODO: if any of the build step fails, the release should be deleted.
-#        with:
-#            # UPDATEME: Replace "rust-ci" with your binary name but keep the star (*).
-#            files: 'magichawk*'
-#        env:
-#          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-#
+  create-release:
+    name: deploy
+    needs: [test]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    strategy: 
+      matrix:
+        target: [ x86_64-unknown-linux-gnu, x86_64-pc-windows-msvc, x86_64-apple-darwin ]
+    steps:
+      - name: checkout
+        uses: actions/checkout@v3
+      - name: install rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: build target
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: package
+        shell: bash
+        run: |
+          # TODO:
+          # strip target/${{ matrix.target }}/release/magichawk
+          cd target/${{ matrix.target }}/release          
+          # UPDATEME: replace the string "rust-ci" with your binary's name.
+          tar czvf ../../../magichawk-${{ matrix.target }}.tar.gz magichawk
+          cd -
+          
+      - name: publish
+        uses: softprops/action-gh-release@v1
+        # TODO: if any of the build step fails, the release should be deleted.
+        with:
+            # UPDATEME: Replace "rust-ci" with your binary name but keep the star (*).
+            files: 'magichawk*'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
