@@ -25,16 +25,16 @@ jobs:
 
       - run: cargo fmt -- --check
 
-#  clippy:
-#    needs: [style]
-#    name: check clippy
-#    runs-on: ubuntu-latest
-#    steps:
-#      - uses: actions/checkout@v3
-#      - uses: dtolnay/rust-toolchain@stable
-#        with:
-#          components: clippy
-#      - run: cargo clippy
+  clippy:
+    needs: [style]
+    name: check clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: cargo clippy
 #
 #  test:
 #    name: test
