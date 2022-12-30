@@ -5,45 +5,49 @@
     <meta charset="utf-8" />
     <title>Proxy Generator</title>
 </head>
+
 <body>
-<form action="create_pdf" method="GET">
-    <p>
-        <textarea name="decklist" id="decklistid" placeholder="examples for recognized lines:
+    <form action="create_pdf" method="GET">
+        <p>
+            <textarea name="decklist" id="decklistid" placeholder="examples for recognized lines:
 mountain (RNA)
 2 plains [5ed]
 2 expansion // explosion
-kabira plateau (will only print back side)" rows="20" cols="40"></textarea>
+kabira plateau (will only print back side)
+ajani, sleeper agent [ph] (will try to use a printing in phyrexian)
+memory lapse [ja] (non-english printings only exist if the art is unique)" rows="20" cols="40"></textarea>
+        </p>
+        <p>
+            <button style="font-size:large;">Create PDF</button>
+        </p>
+        <p>Should back sides be included? If only the back side is named on the list only the back side will be printed
+            anyway.
+        <div>
+            <input type="radio" id="no_backside" name="backside" value="Zero" checked>
+            <label for="Zero">No back sides.</label>
+        </div>
+
+        <div>
+            <input type="radio" id="one_backside" name="backside" value="One">
+            <label for="One">One of each distinct back side in the list.</label>
+        </div>
+
+        <div>
+            <input type="radio" id="matching_backside" name="backside" value="Matching">
+            <label for="Matching">Match card multiplicity.</label>
+        </div>
+        <div>
+            <input type="radio" id="only_backside" name="backside" value="BackOnly">
+            <label for="BackOnly">Only include back side of double-sided cards.</label>
+        </div>
+        </p>
+    </form>
+    <p>
+        This server creates logs and exposes its query history. If your decklist is a state secret don't enter it here.
     </p>
     <p>
-        <button style="font-size:large;">Create PDF</button>
+        <a href=https://github.com/rimathia/magichawk>Source code</a>.
     </p>
-    <p>Should back sides be included? If only the back side is named on the list only the back side will be printed
-        anyway.
-    <div>
-        <input type="radio" id="no_backside" name="backside" value="Zero" checked>
-        <label for="Zero">No back sides.</label>
-    </div>
-
-    <div>
-        <input type="radio" id="one_backside" name="backside" value="One">
-        <label for="One">One of each distinct back side in the list.</label>
-    </div>
-
-    <div>
-        <input type="radio" id="matching_backside" name="backside" value="Matching">
-        <label for="Matching">Match card multiplicity.</label>
-    </div>
-    <div>
-        <input type="radio" id="only_backside" name="backside" value="BackOnly">
-        <label for="BackOnly">Only include back side of double-sided cards.</label>
-    </div>
-    </p>
-</form>
-<p>
-    This server creates logs and exposes its query history. If your decklist is a state secret don't enter it here.
-</p>
-<p>
-    <a href=https://github.com/rimathia/magichawk>Source code</a>.
-</p>
 </body>
+
 </html>

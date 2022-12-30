@@ -49,10 +49,13 @@ fn main() {
         match scryfall_object {
             Some(scryfall_object) => {
                 if nontoken_names.names.contains(&scryfall_object.name) {
+                    let language = scryfall_object.language.clone();
                     card_data
+                        .printings
                         .entry(scryfall_object.name.clone())
                         .or_default()
                         .push(scryfall_object);
+                    card_data.languages.insert(language);
                 } else {
                     not_cards.push(default_card);
                 }
@@ -63,11 +66,16 @@ fn main() {
         }
     }
 
-    let different_cards: usize = card_data.values().map(|printings| printings.len()).sum();
+    let different_cards: usize = card_data
+        .printings
+        .values()
+        .map(|printings| printings.len())
+        .sum();
     println!(
-        "there are {} card names and {} (card name, set) combinations in {}\n",
-        card_data.len(),
+        "there are {} card names and {} (card name, set) combinations ({} languages) in {}\n",
+        card_data.printings.len(),
         different_cards,
+        card_data.languages.len(),
         &opts.output
     );
 
