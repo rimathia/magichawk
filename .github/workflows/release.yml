@@ -63,11 +63,7 @@ jobs:
         run: cargo build ${{ matrix.features }}
 
       - name: test
-        steps:
-          - uses: dtolnay/rust-toolchain@master
-            with:
-              toolchain: ${{ matrix.rust || 'stable' }}
-          - run: cargo test ${{ matrix.features }}
+        run: cargo test ${{ matrix.features }}
 
 #  create-release:
 #    name: deploy
