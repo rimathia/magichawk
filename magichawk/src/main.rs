@@ -242,7 +242,7 @@ fn rocket() -> _ {
                     let deserialized: magichawk::CardPrintings =
                         serde_json::from_reader(file_handle)
                             .ok()
-                            .unwrap_or(magichawk::get_minimal_card_printings());
+                            .unwrap_or_else(magichawk::get_minimal_card_printings);
 
                     magichawk::CardData::from_printings(deserialized, client).await
                 })()

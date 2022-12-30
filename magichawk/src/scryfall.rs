@@ -21,9 +21,8 @@ pub fn get_minimal_scryfall_languages() -> HashSet<String> {
 pub fn get_minimal_card_printings() -> CardPrintings {
     let serialized = include_str!("../assets/card_data.json");
     let printings: CardPrintings = serde_json::from_str(serialized)
-        .ok()
         .expect("should always be able to parse card data included in binary");
-    return printings;
+    printings
 }
 
 fn encode_card_name(name: &str) -> String {
@@ -162,6 +161,12 @@ impl CardPrintings {
     }
 }
 
+impl Default for CardPrintings {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub fn insert_scryfall_object(
     printings: &mut CardPrintings,
     card_names: &ScryfallCardNames,
@@ -249,7 +254,7 @@ mod tests {
             serde_json::from_str(input).unwrap();
         // missing image data
         let object = MinimalScryfallObject::from_dict(&list[0]);
-        assert_eq!(object.is_none(), true)
+        assert!(object.is_none())
     }
 
     #[test]

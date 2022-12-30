@@ -149,9 +149,7 @@ impl CardData {
         } else if printing_right_lang.is_some() {
             printing_right_lang?.clone()
         } else {
-            let lang_en = |p: &&MinimalScryfallObject| {
-                return p.language.to_lowercase() == "en";
-            };
+            let lang_en = |p: &&MinimalScryfallObject| p.language.to_lowercase() == "en";
             let printing_en = matchingprintings.iter().find(lang_en);
             printing_en
                 .unwrap_or(matchingprintings.iter().next()?)
