@@ -34,40 +34,41 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - run: cargo clippy
-#
-#  test:
-#    name: test
-#    needs: [style, clippy]
-#    runs-on: ubuntu-latest
-#
-#    strategy:
-#      matrix:
-#        build: [stable, beta, nightly]
-#        include:
-#          - build: beta
-#            rust: beta
-#          - build: nightly
-#            rust: nightly
-#
-#    steps:
-#      - name: checkout
-#        uses: actions/checkout@v3
-#
-#      - name: install rust
-#        uses: dtolnay/rust-toolchain@master
-#        with:
-#          toolchain: ${{ matrix.rust || 'stable' }}
-#
-#      - name: build
-#        run: cargo build ${{ matrix.features }}
-#
-#      - name: test
-#        uses: dtolnay/rust-toolchain@master
-#        with:
-#          toolchain: ${{ matrix.rust || 'stable' }}
-#        run: cargo test ${{ matrix.features }}
-#
+      - run: cargo clippy --no-deps
+
+  test:
+    name: test
+    needs: [clippy]
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        build: [stable, beta, nightly]
+        include:
+          - build: beta
+            rust: beta
+          - build: nightly
+            rust: nightly
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v3
+
+      - name: install rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust || 'stable' }}
+
+      - name: build
+        run: cargo build ${{ matrix.features }}
+
+      - name: test
+        steps:
+          - uses: dtolnay/rust-toolchain@master
+            with:
+              toolchain: ${{ matrix.rust || 'stable' }}
+          - run: cargo test ${{ matrix.features }}
+
 #  create-release:
 #    name: deploy
 #    needs: [test]
