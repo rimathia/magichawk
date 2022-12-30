@@ -28,10 +28,11 @@ mod pdf;
 pub use crate::pdf::page_images_to_pdf;
 
 mod scryfall;
-use scryfall::query_scryfall_by_name;
 pub use scryfall::{
-    insert_scryfall_object, CardPrintings, MinimalScryfallObject, ScryfallCardNames,
+    get_minimal_card_printings, insert_scryfall_object, CardPrintings, MinimalScryfallObject,
+    ScryfallCardNames,
 };
+use scryfall::{get_minimal_scryfall_languages, query_scryfall_by_name};
 
 mod scryfall_client;
 pub use crate::scryfall_client::ScryfallClient;
@@ -57,17 +58,36 @@ pub struct CardData {
 }
 
 impl CardData {
-    pub async fn from_bulk(bulk: CardPrintings, client: &ScryfallClient) -> Option<CardData> {
+    pub async fn from_client(client: &ScryfallClient) -> Option<CardData> {
         let card_names = ScryfallCardNames::from_api_call(client).await?;
         let lookup = CardNameLookup::from_card_names(&card_names.names);
-        let printings: CardPrintings = bulk
-            .into_iter()
-            .map(|(key, value)| (key.to_lowercase(), value))
-            .collect();
         Some(CardData {
             card_names,
             lookup,
-            printings,
+            printings: CardPrintings::new(),
+        })
+    }
+
+    pub async fn from_printings(
+        printings: CardPrintings,
+        client: &ScryfallClient,
+    ) -> Option<CardData> {
+        let card_names = ScryfallCardNames::from_api_call(client).await?;
+        let lookup = CardNameLookup::from_card_names(&card_names.names);
+        let printings_lowercase = printings
+            .printings
+            .into_iter()
+            .map(|(key, value)| (key.to_lowercase(), value))
+            .collect();
+        let mut languages = get_minimal_scryfall_languages();
+        languages.extend(printings.languages);
+        Some(CardData {
+            card_names,
+            lookup,
+            printings: CardPrintings {
+                printings: printings_lowercase,
+                languages,
+            },
         })
     }
 
@@ -78,7 +98,7 @@ impl CardData {
     }
 
     async fn ensure_contains(&mut self, lookup: &NameLookupResult, client: &ScryfallClient) {
-        let entry = self.printings.entry(lookup.name.clone());
+        let entry = self.printings.printings.entry(lookup.name.clone());
         match entry {
             Occupied(_) => {
                 debug!("there is card data for name {}", entry.key());
@@ -113,22 +133,37 @@ impl CardData {
         };
         debug!("backside in get_card: {:?}", backside);
         self.ensure_contains(&namelookup, client).await;
-        let matchingprintings = self.printings.get(&namelookup.name)?;
+        let matchingprintings = self.printings.printings.get(&namelookup.name)?;
         let set_matches = |p: &&MinimalScryfallObject| match &entry.set {
             Some(s) => p.set == s.to_lowercase(),
             None => false,
         };
-        let mut printing = matchingprintings
-            .iter()
-            .find(set_matches)
-            .unwrap_or(matchingprintings.iter().next()?)
-            .clone();
+        let lang_matches = |p: &&MinimalScryfallObject| match &entry.lang {
+            Some(lang) => p.language == lang.to_lowercase(),
+            None => false,
+        };
+        let printing_right_set = matchingprintings.iter().find(set_matches);
+        let printing_right_lang = matchingprintings.iter().find(lang_matches);
+        let mut printing = if printing_right_set.is_some() {
+            printing_right_set?.clone()
+        } else if printing_right_lang.is_some() {
+            printing_right_lang?.clone()
+        } else {
+            let lang_en = |p: &&MinimalScryfallObject| {
+                return p.language.to_lowercase() == "en";
+            };
+            let printing_en = matchingprintings.iter().find(lang_en);
+            printing_en
+                .unwrap_or(matchingprintings.iter().next()?)
+                .clone()
+        };
         match &printing.meld_result {
             Some(meld_result) => {
                 let meld_result_lookup = self.lookup.find(meld_result);
                 if let Some(meld_result_lookup) = meld_result_lookup {
                     self.ensure_contains(&meld_result_lookup, client).await;
-                    let matchingprintings_meld = self.printings.get(&meld_result_lookup.name)?;
+                    let matchingprintings_meld =
+                        self.printings.printings.get(&meld_result_lookup.name)?;
                     let printing_meld = matchingprintings_meld
                         .iter()
                         .find(set_matches)

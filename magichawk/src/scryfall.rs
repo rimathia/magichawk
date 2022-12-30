@@ -1,11 +1,30 @@
 use log::{error, info};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use time::OffsetDateTime;
 
 use crate::scryfall_client::{blocking_call, ScryfallClient};
 
 const SCRYFALL_CARD_NAMES: &str = "https://api.scryfall.com/catalog/card-names";
+
+// https://scryfall.com/docs/api/languages 2022-12-31
+pub fn get_minimal_scryfall_languages() -> HashSet<String> {
+    HashSet::from(
+        [
+            "en", "es", "fr", "de", "it", "pt", "ja", "ko", "ru", "zhs", "zht", "he", "la", "grc",
+            "ar", "sa", "ph",
+        ]
+        .map(String::from),
+    )
+}
+
+pub fn get_minimal_card_printings() -> CardPrintings {
+    let serialized = include_str!("../assets/card_data.json");
+    let printings: CardPrintings = serde_json::from_str(serialized)
+        .ok()
+        .expect("should always be able to parse card data included in binary");
+    return printings;
+}
 
 fn encode_card_name(name: &str) -> String {
     name.replace(' ', "+").replace("//", "")
@@ -64,6 +83,7 @@ pub struct ScryfallSearchAnswer {
 pub struct MinimalScryfallObject {
     pub name: String,
     pub set: String,
+    pub language: String,
     pub border_crop: String,
     pub border_crop_back: Option<String>,
     pub meld_result: Option<String>,
@@ -75,6 +95,7 @@ impl MinimalScryfallObject {
     ) -> Option<MinimalScryfallObject> {
         let name: String = d["name"].as_str()?.to_string().to_lowercase();
         let set = d["set"].as_str()?.to_string().to_lowercase();
+        let language = d["lang"].as_str()?.to_string().to_lowercase();
 
         let (border_crop, border_crop_back) = {
             if d.contains_key("image_uris") {
@@ -102,19 +123,23 @@ impl MinimalScryfallObject {
         };
         let meld_result = if d["layout"] == "meld" {
             let all_parts = &d["all_parts"].as_array()?;
-            Some(
-                all_parts
-                    .iter()
-                    .find(|entry| entry["component"] == "meld_result")?["name"]
-                    .as_str()?
-                    .to_lowercase(),
-            )
+            let meld_result_name = all_parts
+                .iter()
+                .find(|entry| entry["component"] == "meld_result")?["name"]
+                .as_str()?
+                .to_lowercase();
+            if meld_result_name != name {
+                Some(meld_result_name)
+            } else {
+                None
+            }
         } else {
             None
         };
         Some(MinimalScryfallObject {
             name,
             set,
+            language,
             border_crop,
             border_crop_back,
             meld_result,
@@ -122,155 +147,20 @@ impl MinimalScryfallObject {
     }
 }
 
-// #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-// pub enum ScryfallObjectBack {
-//     Uri(String),
-//     MeldResultName(String),
-// }
-//
-// #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-// pub struct ScryfallObject {
-//     pub name: String,
-//     pub set: String,
-//     pub border_crop: String,
-//     pub border_crop_back: Option<ScryfallObjectBack>,
-// }
+#[derive(Serialize, Deserialize)]
+pub struct CardPrintings {
+    pub printings: HashMap<String, Vec<MinimalScryfallObject>>,
+    pub languages: HashSet<String>,
+}
 
-// impl ScryfallObject {
-//     pub fn from_dict(d: &serde_json::Map<String, serde_json::Value>) -> Option<ScryfallObject> {
-//         let n: String = d["name"].as_str()?.to_string().to_lowercase();
-//         let s = d["set"].as_str()?.to_string().to_lowercase();
-//         let (bc, bcb) = {
-//             if d.contains_key("card_faces") {
-//                 let card_faces = d["card_faces"].as_array()?;
-//                 if card_faces.len() != 2 {
-//                     return None;
-//                 } else {
-//                     (
-//                         card_faces[0]["image_uris"]["border_crop"]
-//                             .as_str()?
-//                             .to_string(),
-//                         Some(ScryfallObjectBack::Uri(
-//                             card_faces[1]["image_uris"]["border_crop"]
-//                                 .as_str()?
-//                                 .to_string(),
-//                         )),
-//                     )
-//                 }
-//             } else if d.contains_key("image_uris") {
-//                 let front = d["image_uris"]["border_crop"].as_str()?.to_string();
-//                 let back = if d["layout"] == "meld" {
-//                     let all_parts = &d["all_parts"];
-//                     match all_parts {
-//                         serde_json::Value::Array(a) => {
-//                             let meld_result =
-//                                 a.iter().find(|entry| entry["component"] == "meld_result")?["name"]
-//                                     .as_str()?
-//                                     .to_lowercase();
-//                             Some(ScryfallObjectBack::MeldResultName(meld_result.to_string()))
-//                         }
-//                         _ => None,
-//                     }
-//                 } else {
-//                     None
-//                 };
-//                 (front, back)
-//             } else {
-//                 return None;
-//             }
-//         };
-//         Some(ScryfallObject {
-//             name: n,
-//             set: s,
-//             border_crop: bc,
-//             border_crop_back: bcb,
-//         })
-//     }
-// }
-
-// #[derive(Serialize, Deserialize, Debug, Clone)]
-// pub struct CardPrinting {
-// pub set: String,
-// pub border_crop: String,
-// pub border_crop_back: Option<String>,
-// }
-
-pub type CardPrintings = HashMap<String, Vec<MinimalScryfallObject>>;
-
-// #[derive(Serialize, Deserialize, Debug)]
-// pub struct Card {
-//     pub name: String,
-//     pub printing: CardPrinting,
-// }
-
-// impl Card {
-//     pub fn from_scryfall_object(_d: &serde_json::Map<String, serde_json::Value>) -> Option<Card> {
-//         None
-//         // let n: String = d["name"].as_str()?.to_string().to_lowercase();
-//         // let s = d["set"].as_str()?.to_string().to_lowercase();
-//         // let (bc, bcb) = {
-//         //     if d.contains_key("card_faces") {
-//         //         let card_faces = d["card_faces"].as_array()?;
-//         //         if card_faces.len() != 2 {
-//         //             return None;
-//         //         } else {
-//         //             (
-//         //                 card_faces[0]["image_uris"]["border_crop"]
-//         //                     .as_str()?
-//         //                     .to_string(),
-//         //                 Some(CardPrintingBack::Url(
-//         //                     card_faces[1]["image_uris"]["border_crop"]
-//         //                         .as_str()?
-//         //                         .to_string(),
-//         //                 )),
-//         //             )
-//         //         }
-//         //     } else if d.contains_key("image_uris") {
-//         //         let front = d["image_uris"]["border_crop"].as_str()?.to_string();
-//         //         let back = if (d["layout"] == "meld") {
-//         //             let all_parts = d["all_parts"].as_array()?;
-//         //             let meld_result = all_parts
-//         //                 .iter()
-//         //                 .find(|entry| entry["component"] == "meld_result")?
-//         //                 .as_str()?;
-//         //             Some(CardPrintingBack::MeldResultName(meld_result.to_string()))
-//         //         } else {
-//         //             None
-//         //         };
-//         //         (front, back)
-//         //     } else {
-//         //         return None;
-//         //     }
-//         // };
-//         // Some(Card {
-//         //     name: n,
-//         //     printing: CardPrinting {
-//         //         set: s,
-//         //         border_crop: bc,
-//         //         border_crop_back: bcb,
-//         //     },
-//         // })
-//     }
-// }
-
-// pub fn insert_scryfall_card(
-//     printings: &mut CardPrintings,
-//     card_names: &ScryfallCardNames,
-//     card: Card,
-// ) {
-//     let lowercase_name = card.name.to_lowercase();
-//     if card_names.names.contains(&lowercase_name) {
-//         printings
-//             .entry(lowercase_name)
-//             .or_insert_with(Vec::new)
-//             .push(card.printing);
-//     } else {
-//         error!(
-//             "couldn't insert scryfall card because name was unknown: {:?}",
-//             card
-//         )
-//     }
-// }
+impl CardPrintings {
+    pub fn new() -> CardPrintings {
+        CardPrintings {
+            printings: HashMap::new(),
+            languages: get_minimal_scryfall_languages(),
+        }
+    }
+}
 
 pub fn insert_scryfall_object(
     printings: &mut CardPrintings,
@@ -283,6 +173,7 @@ pub fn insert_scryfall_object(
         return;
     }
     let minimal = maybe_minimal.unwrap();
+    let language = minimal.language.clone();
     if !card_names.names.contains(&minimal.name) {
         error!(
             "couldn't insert scryfall card because name was unknown: {:?}",
@@ -291,55 +182,11 @@ pub fn insert_scryfall_object(
         return;
     }
     printings
+        .printings
         .entry(minimal.name.clone())
         .or_default()
         .push(minimal);
-    // match without_meld {
-    //     Some(without_meld) => {
-    //         let lowercase_name = without_meld.name.to_lowercase();
-    //         let back = match &without_meld.border_crop_back {
-    //             Some(ScryfallObjectBack::MeldResultName(meld_name)) => {
-    //                 let relateds = printings.get(meld_name);
-    //                 match relateds {
-    //                     Some(relateds) => {
-    //                         let matching_set = relateds.iter().find(|x| x.set == without_meld.set);
-    //                         match matching_set {
-    //                             Some(matching_set) => Some(matching_set.border_crop.clone()),
-    //                             None => {
-    //                                 error!(
-    //                                     "related card {} with set {} not found",
-    //                                     meld_name, without_meld.set
-    //                                 );
-    //                                 None
-    //                             }
-    //                         }
-    //                     }
-    //                     None => {
-    //                         print!("couldn't find meld result {}", meld_name);
-    //                         None
-    //                     }
-    //                 }
-    //             }
-    //             Some(ScryfallObjectBack::Uri(uri)) => Some(uri).cloned(),
-    //             None => None,
-    //         };
-    //         printings
-    //             .entry(without_meld.name.clone())
-    //             .or_default()
-    //             .push(CardPrinting {
-    //                 set: without_meld.set.clone(),
-    //                 border_crop: without_meld.border_crop.clone(),
-    //                 border_crop_back: back,
-    //             });
-    //     }
-    //     None => {
-    //         error!("couldn't convert scryfall object {:?}", object)
-    //     }
-    // }
-    // match Card::from_scryfall_object(object) {
-    //     Some(card) => insert_scryfall_card(printings, card_names, card),
-    //     None => error!("couldn't convert scryfall object {:?}", object),
-    // }
+    printings.languages.insert(language);
 }
 
 pub async fn query_scryfall_by_name(
@@ -369,39 +216,6 @@ pub async fn query_scryfall_by_name(
     }
 }
 
-// pub async fn query_scryfall_object(
-//     name: &str,
-//     set: Option<&str>,
-//     client: &ScryfallClient,
-// ) -> Option<serde_json::Map<String, serde_json::Value>> {
-//     let mut uri = format!(
-//         "https://api.scryfall.com/cards/named?exact={}&format=json",
-//         encode_card_name(name)
-//     );
-//     if set.is_some() {
-//         uri += format!("&set={}", set.as_ref().unwrap()).as_str();
-//     }
-//     let request = client.call(&uri).await;
-//     match request {
-//         Ok(response) => match response
-//             .json::<serde_json::Map<String, serde_json::Value>>()
-//             .await
-//         {
-//             Ok(object) => Some(object),
-//             Err(deserialization_error) => {
-//                 info!(
-//                     "error in deserialization of scryfall response: {}",
-//                     deserialization_error
-//                 );
-//                 None
-//             }
-//         },
-//         Err(request_error) => {
-//             info!("error in call to scryfall api: {}", request_error);
-//             None
-//         }
-//     }
-// }
 #[cfg(test)]
 mod tests {
     use super::*;

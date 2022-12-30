@@ -5,12 +5,17 @@ extern crate serde_json;
 use image::DynamicImage;
 use itertools::Itertools;
 use rocket::http::{ContentType, Status};
-use rocket::{fairing::AdHoc, fs::FileServer, response::content, State};
+use rocket::{fairing::AdHoc, response::content, State};
 use std::fs::File;
-use std::path::Path;
 use tokio::sync::Mutex;
 
 use magichawk::ScryfallClient;
+
+#[get("/")]
+async fn get_index() -> content::RawHtml<String> {
+    let index = include_str!("../static/index.html");
+    content::RawHtml(index.into())
+}
 
 #[get("/create_pdf?<decklist>&<backside>")]
 async fn create_pdf(
@@ -20,8 +25,8 @@ async fn create_pdf(
     decklist: String,
     backside: magichawk::BacksideMode,
 ) -> (rocket::http::Status, (rocket::http::ContentType, Vec<u8>)) {
-    let parsed = magichawk::parse_decklist(&decklist);
     let mut cd = card_data.lock().await;
+    let parsed = magichawk::parse_decklist(&decklist, &cd.printings.languages);
     let cards = magichawk::image_lines_from_decklist(parsed, &mut cd, backside, client).await;
 
     let mut cache = image_cache.lock().await;
@@ -142,8 +147,9 @@ async fn card_data_short(
     let card_data = card_data_m.lock().await;
     content::RawHtml(format!(
         "There are {} different card names and {} (card name, set) combinations",
-        card_data.printings.len(),
+        card_data.printings.printings.len(),
         card_data
+            .printings
             .printings
             .values()
             .map(|printings| printings.len())
@@ -156,13 +162,13 @@ async fn card_data_full(
     card_data_m: &State<Mutex<magichawk::CardData>>,
 ) -> content::RawJson<String> {
     let card_data = card_data_m.lock().await;
-    let serialized: String = serde_json::to_string_pretty(&card_data.printings).unwrap();
+    let serialized: String = serde_json::to_string_pretty(&card_data.printings.printings).unwrap();
     content::RawJson(serialized)
 }
 
 #[derive(Debug, rocket::serde::Deserialize)]
 struct AppConfig {
-    card_data: String,
+    card_data: Option<String>,
 }
 
 async fn trigger_local_call(name: String, url: String, interval: std::time::Duration) {
@@ -227,23 +233,33 @@ fn rocket() -> _ {
         .attach(AdHoc::on_ignite(
             "load card data from file",
             |rocket| async {
-                let card_data: Option<magichawk::CardData> = (|| async {
+                let client = rocket
+                    .state::<ScryfallClient>()
+                    .expect("we should always be able to get a scryfall client");
+                let card_data_from_file: Option<magichawk::CardData> = (|| async {
                     let file_name = rocket.state::<AppConfig>().unwrap().card_data.clone();
-                    let file_handle = File::open(file_name).ok()?;
-                    let bulk: magichawk::CardPrintings =
-                        serde_json::from_reader(file_handle).ok()?;
+                    let file_handle = File::open(file_name?).ok()?;
+                    let deserialized: magichawk::CardPrintings =
+                        serde_json::from_reader(file_handle)
+                            .ok()
+                            .unwrap_or(magichawk::get_minimal_card_printings());
 
-                    let client = rocket.state::<ScryfallClient>()?;
-                    magichawk::CardData::from_bulk(bulk, client).await
+                    magichawk::CardData::from_printings(deserialized, client).await
                 })()
                 .await;
+                let card_data = card_data_from_file.unwrap_or(
+                    magichawk::CardData::from_client(client).await.expect(
+                        "we should always be able to create card data from the scryfall client",
+                    ),
+                );
                 rocket.manage(Mutex::new(card_data))
             },
         ))
         .attach(AdHoc::on_ignite("create image cache", |rocket| async {
             rocket.manage(Mutex::new(magichawk::ScryfallCache::new()))
         }))
-        .mount("/", FileServer::from(Path::new("static")))
+        // .mount("/", FileServer::from(Path::new("static")))
+        .mount("/", routes![get_index])
         .mount("/", routes![card_names_full])
         .mount("/", routes![card_names_short])
         .mount("/", routes![card_names_update])
