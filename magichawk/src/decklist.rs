@@ -86,7 +86,7 @@ pub fn parse_line(line: &str, languages: &HashSet<String>) -> Option<DecklistEnt
             let set = parse_set(set_or_lang);
             let lang = parse_lang(set_or_lang, languages);
             let name_lowercase = name.to_lowercase();
-            let non_entries = vec!["deck", "decklist", "sideboard"];
+            let non_entries = ["deck", "decklist", "sideboard"];
             if non_entries.iter().any(|s| **s == name_lowercase) {
                 None
             } else {

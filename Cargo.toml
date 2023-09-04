@@ -4,3 +4,5 @@ members = [
     "magichawk",
     "printpdf-test"
 ]
+
+resolver = "2"
