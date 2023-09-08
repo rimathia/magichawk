@@ -236,7 +236,7 @@ fn rocket() -> _ {
                 let client = rocket
                     .state::<ScryfallClient>()
                     .expect("we should always be able to get a scryfall client");
-                let card_data_from_file: Option<magichawk::CardData> = (|| async {
+                let card_data_from_file: Option<magichawk::CardData> = async {
                     let file_name = rocket.state::<AppConfig>().unwrap().card_data.clone();
                     let file_handle = File::open(file_name?).ok()?;
                     let deserialized: magichawk::CardPrintings =
@@ -245,7 +245,7 @@ fn rocket() -> _ {
                             .unwrap_or_else(magichawk::get_minimal_card_printings);
 
                     magichawk::CardData::from_printings(deserialized, client).await
-                })()
+                }
                 .await;
                 let card_data = card_data_from_file.unwrap_or(
                     magichawk::CardData::from_client(client).await.expect(
