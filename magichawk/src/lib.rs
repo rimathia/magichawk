@@ -43,8 +43,8 @@ pub const IMAGE_HEIGHT: u32 = 680;
 pub const PAGE_WIDTH: u32 = 3 * IMAGE_WIDTH;
 pub const PAGE_HEIGHT: u32 = 3 * IMAGE_HEIGHT;
 
-pub const IMAGE_HEIGHT_CM: f64 = 8.7;
-pub const IMAGE_WIDTH_CM: f64 = IMAGE_HEIGHT_CM * IMAGE_WIDTH as f64 / IMAGE_HEIGHT as f64;
+pub const IMAGE_HEIGHT_CM: f32 = 8.7;
+pub const IMAGE_WIDTH_CM: f32 = IMAGE_HEIGHT_CM * IMAGE_WIDTH as f32 / IMAGE_HEIGHT as f32;
 
 pub struct ImageLine {
     pub name: String,

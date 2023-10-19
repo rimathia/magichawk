@@ -10,9 +10,9 @@ use crate::IMAGE_WIDTH_CM;
 const A4_WIDTH: Mm = Mm(210.0);
 const A4_HEIGHT: Mm = Mm(297.0);
 
-const INCH_DIV_CM: f64 = 2.54;
-const DPI: f64 = 300.0;
-const DPCM: f64 = DPI / INCH_DIV_CM;
+const INCH_DIV_CM: f32 = 2.54;
+const DPI: f32 = 300.0;
+const DPCM: f32 = DPI / INCH_DIV_CM;
 
 pub fn page_images_to_pdf<I>(it: I) -> Option<Vec<u8>>
 where
@@ -24,8 +24,8 @@ where
         dpi: Some(DPI),
         translate_x: Some((A4_WIDTH - Mm(3.0 * IMAGE_WIDTH_CM * 10.0)) / 2.0),
         translate_y: Some((A4_HEIGHT - Mm(3.0 * IMAGE_HEIGHT_CM * 10.0)) / 2.0),
-        scale_x: Some(IMAGE_WIDTH_CM / (IMAGE_WIDTH as f64) * DPCM),
-        scale_y: Some(IMAGE_HEIGHT_CM / (IMAGE_HEIGHT as f64) * DPCM),
+        scale_x: Some(IMAGE_WIDTH_CM / (IMAGE_WIDTH as f32) * DPCM),
+        scale_y: Some(IMAGE_HEIGHT_CM / (IMAGE_HEIGHT as f32) * DPCM),
         rotate: None,
     };
 
