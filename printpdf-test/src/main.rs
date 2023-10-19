@@ -13,13 +13,13 @@ pub const IMAGE_HEIGHT: u32 = 680;
 pub const PAGE_WIDTH: u32 = 3 * IMAGE_WIDTH;
 pub const PAGE_HEIGHT: u32 = 3 * IMAGE_HEIGHT;
 
-pub const IMAGE_HEIGHT_CM: f64 = 8.7;
-pub const IMAGE_WIDTH_CM: f64 = IMAGE_HEIGHT_CM * IMAGE_WIDTH as f64 / IMAGE_HEIGHT as f64;
+pub const IMAGE_HEIGHT_CM: f32 = 8.7;
+pub const IMAGE_WIDTH_CM: f32 = IMAGE_HEIGHT_CM * IMAGE_WIDTH as f32 / IMAGE_HEIGHT as f32;
 
-pub const INCH_DIV_CM: f64 = 2.54;
+pub const INCH_DIV_CM: f32 = 2.54;
 
-pub const DPI: f64 = 300.0;
-pub const DPCM: f64 = DPI / INCH_DIV_CM;
+pub const DPI: f32 = 300.0;
+pub const DPCM: f32 = DPI / INCH_DIV_CM;
 
 const A4_WIDTH: Mm = Mm(210.0);
 const A4_HEIGHT: Mm = Mm(297.0);
@@ -88,8 +88,8 @@ fn test_jpg() {
         dpi: Some(DPI),
         translate_x: Some(Mm(10.0)),
         translate_y: Some(Mm(10.0)),
-        scale_x: Some(IMAGE_WIDTH_CM / (IMAGE_WIDTH as f64) * DPCM),
-        scale_y: Some(IMAGE_HEIGHT_CM / (IMAGE_HEIGHT as f64) * DPCM),
+        scale_x: Some(IMAGE_WIDTH_CM / (IMAGE_WIDTH as f32) * DPCM),
+        scale_y: Some(IMAGE_HEIGHT_CM / (IMAGE_HEIGHT as f32) * DPCM),
         rotate: None,
     };
     println!("the transform is {:?}", transform);
@@ -136,8 +136,8 @@ fn test_rgb() {
         dpi: Some(DPI),
         translate_x: Some((A4_WIDTH - Mm(3.0 * IMAGE_WIDTH_CM * 10.0)) / 2.0),
         translate_y: Some((A4_HEIGHT - Mm(3.0 * IMAGE_HEIGHT_CM * 10.0)) / 2.0),
-        scale_x: Some(IMAGE_WIDTH_CM / (IMAGE_WIDTH as f64) * DPCM),
-        scale_y: Some(IMAGE_HEIGHT_CM / (IMAGE_HEIGHT as f64) * DPCM),
+        scale_x: Some(IMAGE_WIDTH_CM / (IMAGE_WIDTH as f32) * DPCM),
+        scale_y: Some(IMAGE_HEIGHT_CM / (IMAGE_HEIGHT as f32) * DPCM),
         rotate: None,
     };
     println!("the transform is {:?}", transform);
