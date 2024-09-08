@@ -29,7 +29,7 @@ fn encode_card_name(name: &str) -> String {
     name.replace(' ', "+").replace("//", "")
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ScryfallCardNames {
     pub object: String,
     pub uri: String,
