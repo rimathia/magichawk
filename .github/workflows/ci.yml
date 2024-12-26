@@ -1,6 +1,6 @@
 # based on
 # https://github.com/FedericoPonzi/rust-ci/blob/master/.github/workflows/CI.yml
-name: CI 
+name: CI
 
 on:
   pull_request:
@@ -8,7 +8,7 @@ on:
     branches:
       - master
     tags:
-      - 'v*.*.*'
+      - "v*.*.*"
 
 jobs:
   style:
@@ -70,9 +70,9 @@ jobs:
     needs: [test]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
-    strategy: 
+    strategy:
       matrix:
-        target: [ x86_64-unknown-linux-gnu ]
+        target: [x86_64-unknown-linux-gnu]
     steps:
       - name: checkout
         uses: actions/checkout@v3
@@ -90,17 +90,20 @@ jobs:
         run: |
           # TODO:
           # strip target/${{ matrix.target }}/release/magichawk
-          cd target/${{ matrix.target }}/release          
           # UPDATEME: replace the string "rust-ci" with your binary's name.
-          tar czvf ../../../magichawk-${{ matrix.target }}.tar.gz magichawk
+          mkdir magichawk-${{ matrix.target }}
+          cp target/${{ matrix.target }}/release/magichawk magichawk-${{ matrix.target }}
+          cp magichawk/Rocket.toml magichawk-${{ matrix.target }}
+          mkdir magichawk-${{ matrix.target }}/assets
+          cp magichawk/assets/card_data.json magichawk-${{ matrix.target }}/assets
+          tar --create --zstd --verbose --file magichawk-${{ matrix.target }}.tar.gz magichawk-${{ matrix.target }}
           cd -
-          
+
       - name: publish
         uses: softprops/action-gh-release@v1
         # TODO: if any of the build step fails, the release should be deleted.
         with:
-            # UPDATEME: Replace "rust-ci" with your binary name but keep the star (*).
-            files: 'magichawk*'
+          # UPDATEME: Replace "rust-ci" with your binary name but keep the star (*).
+          files: "magichawk*"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
