@@ -96,8 +96,9 @@ jobs:
           cp magichawk/Rocket.toml magichawk-${{ matrix.target }}
           mkdir magichawk-${{ matrix.target }}/assets
           cp magichawk/assets/card_data.json magichawk-${{ matrix.target }}/assets
+          tree magichawk-${{ matrix.target }}
           tar --create --zstd --verbose --file magichawk-${{ matrix.target }}.tar.gz magichawk-${{ matrix.target }}
-          cd -
+          cd /
 
       - name: publish
         uses: softprops/action-gh-release@v1
