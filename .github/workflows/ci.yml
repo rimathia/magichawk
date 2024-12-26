@@ -96,7 +96,8 @@ jobs:
           cp magichawk/Rocket.toml magichawk-${{ matrix.target }}
           mkdir magichawk-${{ matrix.target }}/assets
           cp magichawk/assets/card_data.json magichawk-${{ matrix.target }}/assets
-          tree magichawk-${{ matrix.target }}
+          mkdir magichawk-${{ matrix.target }}/static
+          cp magichawk/static/index.html magichawk-${{ matrix.target }}/static
           tar --create --zstd --verbose --file magichawk-${{ matrix.target }}.tar.gz magichawk-${{ matrix.target }}
           cd /
 
