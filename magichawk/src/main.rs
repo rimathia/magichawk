@@ -2,8 +2,8 @@
 extern crate rocket;
 extern crate serde_json;
 
-use image::DynamicImage;
 use itertools::Itertools;
+use printpdf::image_crate::DynamicImage;
 use rocket::http::{ContentType, Status};
 use rocket::{fairing::AdHoc, response::content, State};
 use std::fs::File;

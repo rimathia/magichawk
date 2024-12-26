@@ -5,6 +5,9 @@ use lazy_static::lazy_static;
 use log::debug;
 use tokio::time::{Duration, Instant};
 
+// headers required according to https://scryfall.com/docs/api/
+const USER_AGENT: &str = "magichawk/0.3";
+const ACCEPT: &str = "*/*";
 const SCRYFALL_COOLDOWN: Duration = Duration::from_millis(100);
 
 // use a blocking mutex since we are only holding the lock to find out when we can call
@@ -18,8 +21,20 @@ pub struct ScryfallClient {
 
 impl ScryfallClient {
     pub fn new() -> ScryfallClient {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::USER_AGENT,
+            reqwest::header::HeaderValue::from_static(USER_AGENT),
+        );
+        headers.insert(
+            reqwest::header::ACCEPT,
+            reqwest::header::HeaderValue::from_static(ACCEPT),
+        );
         ScryfallClient {
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .default_headers(headers)
+                .build()
+                .unwrap(),
         }
     }
 
@@ -51,5 +66,18 @@ pub fn blocking_call(uri: &str) -> Result<reqwest::blocking::Response, reqwest::
     if sleep_interval > Duration::from_secs(0) {
         std::thread::sleep(sleep_interval);
     }
-    reqwest::blocking::get(uri)
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        reqwest::header::USER_AGENT,
+        reqwest::header::HeaderValue::from_static(USER_AGENT),
+    );
+    headers.insert(
+        reqwest::header::ACCEPT,
+        reqwest::header::HeaderValue::from_static(ACCEPT),
+    );
+    let client = reqwest::blocking::Client::builder()
+        .default_headers(headers)
+        .build()
+        .unwrap();
+    client.get(uri).send()
 }

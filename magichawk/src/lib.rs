@@ -9,7 +9,9 @@ extern crate time;
 extern crate tokio;
 
 use log::{debug, error, info};
-use printpdf::image_crate::{imageops::overlay, DynamicImage, Rgb, RgbImage};
+use printpdf::image_crate::{
+    imageops::overlay, load_from_memory_with_format, DynamicImage, ImageFormat, Rgb, RgbImage,
+};
 use rocket::form::FromFormField;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::fmt;
@@ -59,7 +61,9 @@ pub struct CardData {
 
 impl CardData {
     pub async fn from_client(client: &ScryfallClient) -> Option<CardData> {
+        debug!("getting card_names");
         let card_names = ScryfallCardNames::from_api_call(client).await?;
+        debug!("card_names: {:?}", card_names);
         let lookup = CardNameLookup::from_card_names(&card_names.names);
         Some(CardData {
             card_names,
@@ -239,7 +243,7 @@ pub async fn query_image_uri(uri: &str, client: &ScryfallClient) -> Option<Dynam
     let request = client.call(uri).await;
     match request {
         Ok(response) => match response.bytes().await {
-            Ok(b) => match image::load_from_memory_with_format(&b, image::ImageFormat::Jpeg) {
+            Ok(b) => match load_from_memory_with_format(&b, ImageFormat::Jpeg) {
                 Ok(im) => Some(im),
                 Err(e) => {
                     error!("error converting response to jpeg: {}", e);
