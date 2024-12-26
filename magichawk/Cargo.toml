@@ -1,6 +1,6 @@
 [package]
 name = "magichawk"
-version = "0.3.8"
+version = "0.3.11"
 authors = ["Mathias Ritzmann <rimathia@users.noreply.github.com>"]
 edition = "2021"
 default-run = "magichawk"
@@ -16,7 +16,7 @@ ngrammatic = ">=0.4"
 ord_subset = ">=3.1.1"
 printpdf = { version = ">=0.5.3", features = ["embedded_images"] }
 regex = ">=1.7.0"
-reqwest = { version = ">=0.11.13", default-features = false, features = [
+reqwest = { version = ">=0.12.9", default-features = false, features = [
     "blocking",
     "json",
     "rustls-tls",
