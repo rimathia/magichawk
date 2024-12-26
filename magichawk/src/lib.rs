@@ -37,6 +37,7 @@ pub use scryfall::{
 use scryfall::{get_minimal_scryfall_languages, query_scryfall_by_name};
 
 mod scryfall_client;
+pub use crate::scryfall_client::blocking_call;
 pub use crate::scryfall_client::ScryfallClient;
 
 pub const IMAGE_WIDTH: u32 = 480;
@@ -61,9 +62,8 @@ pub struct CardData {
 
 impl CardData {
     pub async fn from_client(client: &ScryfallClient) -> Option<CardData> {
-        debug!("getting card_names");
         let card_names = ScryfallCardNames::from_api_call(client).await?;
-        debug!("card_names: {:?}", card_names);
+
         let lookup = CardNameLookup::from_card_names(&card_names.names);
         Some(CardData {
             card_names,
