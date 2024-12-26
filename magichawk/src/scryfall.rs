@@ -56,15 +56,14 @@ impl ScryfallCardNames {
     }
 
     pub fn from_api_call_blocking() -> Option<ScryfallCardNames> {
-        let mut card_names = blocking_call(SCRYFALL_CARD_NAMES)
-            .ok()?
-            .json::<ScryfallCardNames>()
-            .ok()?;
-        card_names.date = Some(OffsetDateTime::now_utc());
-        for name in card_names.names.iter_mut() {
+        let card_names = blocking_call(SCRYFALL_CARD_NAMES).ok()?;
+        // print!("card_names: {:?}", card_names.text());
+        let mut card_names_json = card_names.json::<ScryfallCardNames>().unwrap();
+        card_names_json.date = Some(OffsetDateTime::now_utc());
+        for name in card_names_json.names.iter_mut() {
             *name = name.to_lowercase();
         }
-        Some(card_names)
+        Some(card_names_json)
     }
 }
 
