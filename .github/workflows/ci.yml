@@ -90,14 +90,13 @@ jobs:
         run: |
           # TODO:
           # strip target/${{ matrix.target }}/release/magichawk
-          cd target/${{ matrix.target }}/release
           # UPDATEME: replace the string "rust-ci" with your binary's name.
           mkdir magichawk-${{ matrix.target }}
-          cp magichawk magichawk-${{ matrix.target }}
-          cp Rocket.toml magichawk-${{ matrix.target }}
+          cp target/${{ matrix.target }}/release/magichawk magichawk-${{ matrix.target }}
+          cp magichawk/Rocket.toml magichawk-${{ matrix.target }}
           mkdir magichawk-${{ matrix.target }}/assets
-          cp assets/card+data.json magichawk-${{ matrix.target }}/assets
-          tar --create --zstd --verbose --file ../../../magichawk-${{ matrix.target }}.tar.gz magichawk-${{ matrix.target }}
+          cp magichawk/assets/card_data.json magichawk-${{ matrix.target }}/assets
+          tar --create --zstd --verbose --file magichawk-${{ matrix.target }}.tar.gz magichawk-${{ matrix.target }}
           cd -
 
       - name: publish
