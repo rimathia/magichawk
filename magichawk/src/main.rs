@@ -5,7 +5,7 @@ extern crate serde_json;
 use itertools::Itertools;
 use printpdf::image_crate::DynamicImage;
 use rocket::http::{ContentType, Status};
-use rocket::{fairing::AdHoc, response::content, State};
+use rocket::{State, fairing::AdHoc, response::content};
 use std::fs::File;
 use tokio::sync::Mutex;
 

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use time::OffsetDateTime;
 
-use crate::scryfall_client::{blocking_call, ScryfallClient};
+use crate::scryfall_client::{ScryfallClient, blocking_call};
 
 const SCRYFALL_CARD_NAMES: &str = "https://api.scryfall.com/catalog/card-names";
 

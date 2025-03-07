@@ -8,16 +8,16 @@ extern crate serde_json;
 extern crate time;
 extern crate tokio;
 
+use Option::{None, Some};
 use log::{debug, error, info};
 use printpdf::image_crate::{
-    imageops::overlay, load_from_memory_with_format, DynamicImage, ImageFormat, Rgb, RgbImage,
+    DynamicImage, ImageFormat, Rgb, RgbImage, imageops::overlay, load_from_memory_with_format,
 };
 use rocket::form::FromFormField;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::fmt;
 use std::string::String;
 use time::OffsetDateTime;
-use Option::{None, Some};
 
 mod decklist;
 pub use crate::decklist::parse_decklist;
@@ -31,14 +31,14 @@ pub use crate::pdf::page_images_to_pdf;
 
 mod scryfall;
 pub use scryfall::{
-    get_minimal_card_printings, insert_scryfall_object, CardPrintings, MinimalScryfallObject,
-    ScryfallCardNames,
+    CardPrintings, MinimalScryfallObject, ScryfallCardNames, get_minimal_card_printings,
+    insert_scryfall_object,
 };
 use scryfall::{get_minimal_scryfall_languages, query_scryfall_by_name};
 
 mod scryfall_client;
-pub use crate::scryfall_client::blocking_call;
 pub use crate::scryfall_client::ScryfallClient;
+pub use crate::scryfall_client::blocking_call;
 
 pub const IMAGE_WIDTH: u32 = 480;
 pub const IMAGE_HEIGHT: u32 = 680;
