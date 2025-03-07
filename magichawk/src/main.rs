@@ -5,7 +5,7 @@ extern crate serde_json;
 use itertools::Itertools;
 use printpdf::image_crate::DynamicImage;
 use rocket::http::{ContentType, Status};
-use rocket::{fairing::AdHoc, response::content, State};
+use rocket::{State, fairing::AdHoc, response::content};
 use std::fs::File;
 use tokio::sync::Mutex;
 
@@ -108,7 +108,7 @@ async fn card_names_short(
         "There are {} card names, last update approximately {}, the first three are {:?}, {:?}, {:?}",
         names.len(),
         update,
-        names.get(0),
+        names.first(),
         names.get(1),
         names.get(2),
     ))

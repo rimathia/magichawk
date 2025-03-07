@@ -8,16 +8,16 @@ extern crate serde_json;
 extern crate time;
 extern crate tokio;
 
+use Option::{None, Some};
 use log::{debug, error, info};
 use printpdf::image_crate::{
-    imageops::overlay, load_from_memory_with_format, DynamicImage, ImageFormat, Rgb, RgbImage,
+    DynamicImage, ImageFormat, Rgb, RgbImage, imageops::overlay, load_from_memory_with_format,
 };
 use rocket::form::FromFormField;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::fmt;
 use std::string::String;
 use time::OffsetDateTime;
-use Option::{None, Some};
 
 mod decklist;
 pub use crate::decklist::parse_decklist;
@@ -31,14 +31,14 @@ pub use crate::pdf::page_images_to_pdf;
 
 mod scryfall;
 pub use scryfall::{
-    get_minimal_card_printings, insert_scryfall_object, CardPrintings, MinimalScryfallObject,
-    ScryfallCardNames,
+    CardPrintings, MinimalScryfallObject, ScryfallCardNames, get_minimal_card_printings,
+    insert_scryfall_object,
 };
 use scryfall::{get_minimal_scryfall_languages, query_scryfall_by_name};
 
 mod scryfall_client;
-pub use crate::scryfall_client::blocking_call;
 pub use crate::scryfall_client::ScryfallClient;
+pub use crate::scryfall_client::blocking_call;
 
 pub const IMAGE_WIDTH: u32 = 480;
 pub const IMAGE_HEIGHT: u32 = 680;
@@ -159,21 +159,18 @@ impl CardData {
                 .unwrap_or(matchingprintings.iter().next()?)
                 .clone()
         };
-        match &printing.meld_result {
-            Some(meld_result) => {
-                let meld_result_lookup = self.lookup.find(meld_result);
-                if let Some(meld_result_lookup) = meld_result_lookup {
-                    self.ensure_contains(&meld_result_lookup, client).await;
-                    let matchingprintings_meld =
-                        self.printings.printings.get(&meld_result_lookup.name)?;
-                    let printing_meld = matchingprintings_meld
-                        .iter()
-                        .find(set_matches)
-                        .unwrap_or(matchingprintings_meld.iter().next()?);
-                    printing.border_crop_back = Some(printing_meld.border_crop.clone());
-                }
+        if let Some(meld_result) = &printing.meld_result {
+            let meld_result_lookup = self.lookup.find(meld_result);
+            if let Some(meld_result_lookup) = meld_result_lookup {
+                self.ensure_contains(&meld_result_lookup, client).await;
+                let matchingprintings_meld =
+                    self.printings.printings.get(&meld_result_lookup.name)?;
+                let printing_meld = matchingprintings_meld
+                    .iter()
+                    .find(set_matches)
+                    .unwrap_or(matchingprintings_meld.iter().next()?);
+                printing.border_crop_back = Some(printing_meld.border_crop.clone());
             }
-            None => {}
         }
         let frontmult = if backside == BacksideMode::BackOnly && printing.border_crop_back.is_some()
         {
@@ -214,16 +211,13 @@ pub async fn image_lines_from_decklist(
     let mut image_lines = Vec::<ImageLine>::new();
     for line in parsed {
         let entry = &line.as_entry();
-        match entry {
-            Some(entry) => {
-                if let Some(image_line) = card_data
-                    .get_card(entry, default_backside_mode, client)
-                    .await
-                {
-                    image_lines.push(image_line);
-                }
+        if let Some(entry) = entry {
+            if let Some(image_line) = card_data
+                .get_card(entry, default_backside_mode, client)
+                .await
+            {
+                image_lines.push(image_line);
             }
-            None => {}
         }
     }
     image_lines

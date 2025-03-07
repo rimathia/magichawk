@@ -47,7 +47,7 @@ pub struct ParsedDecklistLine<'a> {
     entry: Option<DecklistEntry>,
 }
 
-impl<'a> ParsedDecklistLine<'a> {
+impl ParsedDecklistLine<'_> {
     pub fn as_entry(&self) -> Option<DecklistEntry> {
         self.entry.clone()
     }
@@ -296,18 +296,5 @@ mod tests {
         for (left, right) in parsed.iter().zip(expected.iter()) {
             assert_eq!(left, right);
         }
-
-        // not necessary anymore because we filter out the lines "deck" and "sideboard" manually now
-        // let mut card_data = CardData::from_bulk(
-        //     serde_json::from_reader(
-        //         //serde_json::from_reader::<HashMap<String, Vec<CardPrinting>>(
-        //         std::fs::File::open("assets/card_data.json").unwrap(),
-        //     )
-        //     .unwrap(),
-        // )
-        // .unwrap();
-
-        // let imagelines = image_lines_from_decklist(parsed, &mut card_data, BacksideMode::One);
-        // assert_eq!(imagelines.len(), 3);
     }
 }
