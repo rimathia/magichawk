@@ -47,7 +47,7 @@ pub struct ParsedDecklistLine<'a> {
     entry: Option<DecklistEntry>,
 }
 
-impl<'a> ParsedDecklistLine<'a> {
+impl ParsedDecklistLine<'_> {
     pub fn as_entry(&self) -> Option<DecklistEntry> {
         self.entry.clone()
     }

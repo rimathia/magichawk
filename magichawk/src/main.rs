@@ -108,7 +108,7 @@ async fn card_names_short(
         "There are {} card names, last update approximately {}, the first three are {:?}, {:?}, {:?}",
         names.len(),
         update,
-        names.get(0),
+        names.first(),
         names.get(1),
         names.get(2),
     ))
